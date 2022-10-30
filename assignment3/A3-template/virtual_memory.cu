@@ -7,7 +7,7 @@
 __device__ void init_invert_page_table(VirtualMemory *vm) {
 
     for (int i = 0; i < 4*(vm->PAGE_ENTRIES); i++) {
-        vm->invert_page_table[i] = 0x80000000; // invalid := MSB is 1
+        vm->invert_page_table[i] = 0x80008000; // invalid := MSB is 1
         // vm->invert_page_table[i] = i << 16;
         // store the time when the physical frame is used
         // vm->invert_page_table[i + 2*vm->PAGE_ENTRIES] = 0;
@@ -53,7 +53,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     u32 free_swap_frame = 1 << 31;
     bool found_page = false;
     bool found_free = false;
-    // bool found_free_swap = false;
+    bool found_free_swap = false;
     for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
         if ((vm->invert_page_table[i] >> 16) == (entry >> 16)) {
             // found page
@@ -79,15 +79,23 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         // page fault
         (*vm->pagefault_num_ptr)++;
         // swap page from storage
-        for (int i = 0; i < 3*(vm->PAGE_ENTRIES); i++) {
-            if (vm->invert_page_table[i + vm->PAGE_ENTRIES] >> 31 == 1) {
+        u32 pt_entry;
+        for (int i = 0; i < 4*(vm->PAGE_ENTRIES); i++) {
+            if (i%2 == 1) {
+                // lower 16 bits
+                pt_entry = vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff;
+            } else {
+                // higher 16 bits
+                pt_entry = vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] >> 16;
+            }
+            if (pt_entry >> 15 == 1) {
                 // swap frame not used yet
-                // if (found_free_swap) continue;
-                // found_free_swap = true;
+                if (found_free_swap) continue;
+                found_free_swap = true;
                 free_swap_frame = i;
                 continue;
             }
-            if ((vm->invert_page_table[i + vm->PAGE_ENTRIES] >> 16) == (entry >> 16)) {
+            if (!found_page && (pt_entry) == (entry >> 16)) {
                 // found corresponding page in disk
                 found_page = true;
                 if (found_free) {
@@ -110,12 +118,22 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                         vm->buffer[32*victim_frame+j] = tmp_data[j];
                     }
                     // modify page table to manage swap entry
-                    vm->invert_page_table[i + vm->PAGE_ENTRIES] = (vm->invert_page_table[victim_frame] >> 16) << 16;
+                    if (i%2 == 1) {
+                        // lower 16 bits
+                        vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] = 
+                            (vm->invert_page_table[victim_frame] >> 16) | 
+                            (vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff0000);
+                    } else {
+                        // higher 16 bits
+                        vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] = 
+                            (vm->invert_page_table[victim_frame] & 0xffff0000) | 
+                            (vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff);
+                    }
                 }
                 vm->invert_page_table[victim_frame] = entry;
                 // set physical address
                 phy_addr = (victim_frame << 5) | (addr & 0x1f);
-                break;
+                // break;
             }
         }
     }
@@ -134,7 +152,17 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
             vm->storage[32*free_swap_frame+j] = vm->buffer[32*victim_frame+j];
         }
         // modify page table
-        vm->invert_page_table[free_swap_frame + vm->PAGE_ENTRIES] = (vm->invert_page_table[victim_frame] >> 16) << 16;
+        if (free_swap_frame%2 == 1) {
+            // lower 16 bits
+            vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] = 
+                (vm->invert_page_table[victim_frame] >> 16) |
+                (vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff0000);
+        } else {
+            // higher 16 bits
+            vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] = 
+                (vm->invert_page_table[victim_frame] & 0xffff0000) |
+                (vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff);
+        }
         vm->invert_page_table[victim_frame] = entry;
         phy_addr = (victim_frame << 5) | (addr & 0x1f);
     }
