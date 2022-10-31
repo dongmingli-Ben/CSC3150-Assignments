@@ -22,8 +22,8 @@
 __device__ __managed__ int pagefault_num = 0;
 
 // data input and output
-__device__ __managed__ uchar results[STORAGE_SIZE];
-__device__ __managed__ uchar input[STORAGE_SIZE];
+__device__ __managed__ uchar results[STORAGE_SIZE+PHYSICAL_MEM_SIZE];
+__device__ __managed__ uchar input[STORAGE_SIZE+PHYSICAL_MEM_SIZE];
 
 // memory allocation for virtual_memory
 // secondary memory
@@ -86,7 +86,7 @@ __host__ int load_binaryFile(char *fileName, void *buffer, int bufferSize) {
 
 int main() {
   cudaError_t cudaStatus;
-  int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE);
+  int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE+PHYSICAL_MEM_SIZE);
 
   /* Launch kernel function in GPU, with single thread
   and dynamically allocate INVERT_PAGE_TABLE_SIZE bytes of share memory,
