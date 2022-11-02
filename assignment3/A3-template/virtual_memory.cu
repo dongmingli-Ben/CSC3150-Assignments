@@ -8,33 +8,29 @@ __device__ void print_page_table_debug(VirtualMemory *vm) {
   u32 entry;
   for (u32 i = 0; i < vm->PAGE_ENTRIES; i++) {
     entry = vm->invert_page_table[i];
-    printf("Physical mem frame %u stores logical page %u, counter %u\n", i, entry>>16, entry & 0xffff);
+    printf("Physical mem frame %u stores logical page %u, counter %u\n", i, entry>>11, entry & 0x7ff);
   }
-  for (u32 i = 0; i < vm->PAGE_ENTRIES*4; i++) {
-    u32 index = i/2;
-    entry = vm->invert_page_table[vm->PAGE_ENTRIES+index];
-    if (i % 2 == 1) {
-      // lower
-      entry = entry & 0xffff;
-    } else {
-      entry = entry >> 16;
-    }
-    printf("Swap mem frame %u stores logical page %u\n", i, entry);
+  for (u32 i = 0; i < vm->SWAP_ENTRIES; i++) {
+    printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i] >> 11);
   }
 }
 
 __device__ void init_invert_page_table(VirtualMemory *vm) {
 
-    for (int i = 0; i < 4*(vm->PAGE_ENTRIES); i++) {
-        vm->invert_page_table[i] = 0x80008000; // invalid := MSB is 1
+    for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
+        vm->invert_page_table[i] = 0x80000000; // invalid := MSB is 1
         // vm->invert_page_table[i] = i << 16;
         // store the time when the physical frame is used
         // vm->invert_page_table[i + 2*vm->PAGE_ENTRIES] = 0;
     }
+    // initialize swap table
+    for (int i = 0; i < vm->SWAP_ENTRIES; i++) {
+        vm->swap_table[i] = 0x80000000;
+    }
 }
 
 __device__ void vm_init(VirtualMemory *vm, uchar *buffer, uchar *storage,
-                        u32 *invert_page_table, int *pagefault_num_ptr,
+                        u32 *invert_page_table, u32 *swap_table, int *pagefault_num_ptr,
                         int PAGESIZE, int INVERT_PAGE_TABLE_SIZE,
                         int PHYSICAL_MEM_SIZE, int STORAGE_SIZE,
                         int PAGE_ENTRIES) {
@@ -42,6 +38,7 @@ __device__ void vm_init(VirtualMemory *vm, uchar *buffer, uchar *storage,
     vm->buffer = buffer;
     vm->storage = storage;
     vm->invert_page_table = invert_page_table;
+    vm->swap_table = swap_table;
     vm->pagefault_num_ptr = pagefault_num_ptr;
 
     // init constants
@@ -50,6 +47,7 @@ __device__ void vm_init(VirtualMemory *vm, uchar *buffer, uchar *storage,
     vm->PHYSICAL_MEM_SIZE = PHYSICAL_MEM_SIZE;
     vm->STORAGE_SIZE = STORAGE_SIZE;
     vm->PAGE_ENTRIES = PAGE_ENTRIES;
+    vm->SWAP_ENTRIES = STORAGE_SIZE / PAGESIZE;
 
     // before first vm_write or vm_read
     init_invert_page_table(vm);
@@ -63,8 +61,13 @@ if the page is not used (written) yet.
 Note: virtual page range 2^13, pid range 2^2
 */
 __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
+    u32 PAGE_BIT = 13;
+    u32 FRAME_BIT = 11;
+    u32 PAGE_MASK = 0x1fff;
+    u32 COUNTER_MASK = 0x7ff;
+    assert(PAGE_BIT + FRAME_BIT < 29); // otherwise u32 is not enough to hold an entry
     u32 pid = 0;
-    u32 entry = (((addr >> 5) & 0x1fff) << 16) | (pid << 29);
+    u32 entry = (((addr >> 5) & PAGE_MASK) << FRAME_BIT) | (pid << 29);
     u32 phy_addr;
     /* search in inverted page table */
     // also search for the LRU physical frame
@@ -76,15 +79,15 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     bool found_free_swap = false;
     bool new_phy_frame = false;  // if it is false, do not increment the counter
     for (int i = 0; i < vm->PAGE_ENTRIES; i++) {
-        if ((vm->invert_page_table[i] >> 16) == (entry >> 16)) {
+        if ((vm->invert_page_table[i] >> FRAME_BIT) == (entry >> FRAME_BIT)) {
             // found page
             phy_addr = (i << 5) | (addr & 0x1f);
             found_page = true;
             // set counter
-            if ((vm->invert_page_table[i] & 0xffff) > 1) {
+            if ((vm->invert_page_table[i] & COUNTER_MASK) > 1) {
                 // use a new frame
                 new_phy_frame = true;
-                vm->invert_page_table[i] &= 0xffff0000; // set the counter to 0, so it can be increamented to 1 at the end
+                vm->invert_page_table[i] &= (!COUNTER_MASK); // set the counter to 0, so it can be increamented to 1 at the end
             } else {
                 vm->invert_page_table[i] = entry + 1;
             }
@@ -96,8 +99,8 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                 found_free = true;
                 continue;
             }
-            if ((vm->invert_page_table[i] & 0xffff) > time) {
-                time = vm->invert_page_table[i] & 0xffff;
+            if ((vm->invert_page_table[i] & COUNTER_MASK) > time) {
+                time = vm->invert_page_table[i] & COUNTER_MASK;
                 victim_frame = i;
             }
         }
@@ -106,26 +109,18 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         // page fault
         (*vm->pagefault_num_ptr)++;
         // swap page (page at victim frame) from storage
-        if ((vm->invert_page_table[victim_frame] & 0xffff) > 1) {
+        if ((vm->invert_page_table[victim_frame] & COUNTER_MASK) > 1) {
             new_phy_frame = true;
         }
-        u32 pt_entry;
-        for (int i = 0; i < 4*(vm->PAGE_ENTRIES); i++) {
-            if (i%2 == 1) {
-                // lower 16 bits
-                pt_entry = vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff;
-            } else {
-                // higher 16 bits
-                pt_entry = vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] >> 16;
-            }
-            if ((pt_entry >> 15) == 1) {
+        for (int i = 0; i < vm->SWAP_ENTRIES; i++) {
+            if ((vm->swap_table[i] >> 31) == 1) {
                 // swap frame not used yet
                 if (found_free_swap) continue;
                 found_free_swap = true;
                 free_swap_frame = i;
                 continue;
             }
-            if ((!found_page) && (pt_entry == (entry >> 16))) {
+            if ((!found_page) && (vm->swap_table[i] == (entry >> FRAME_BIT))) {
                 // found corresponding page in disk
                 found_page = true;
                 if (found_free) {
@@ -148,17 +143,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                         vm->buffer[32*victim_frame+j] = tmp_data[j];
                     }
                     // modify page table to manage swap entry
-                    if (i%2 == 1) {
-                        // lower 16 bits
-                        vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] = 
-                            (vm->invert_page_table[victim_frame] >> 16) | 
-                            (vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff0000);
-                    } else {
-                        // higher 16 bits
-                        vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] = 
-                            (vm->invert_page_table[victim_frame] & 0xffff0000) | 
-                            (vm->invert_page_table[i/2 + vm->PAGE_ENTRIES] & 0xffff);
-                    }
+                    vm->swap_table[i] = vm->invert_page_table[victim_frame] >> FRAME_BIT;
                 }
                 vm->invert_page_table[victim_frame] = entry;
                 // set physical address
@@ -180,45 +165,14 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
             assert(0);
         }
         if (!found_free) {
-            // move victim data into storage
-            // printf("Before swap op, victim frame %u, entry %u\n", 
-            //     victim_frame,
-            //     vm->invert_page_table[victim_frame] >> 16);
             for (int j = 0; j < 32; j++) {
                 vm->storage[32*free_swap_frame+j] = vm->buffer[32*victim_frame+j];
             }
             // modify page table
-            if (free_swap_frame%2 == 1) {
-                // lower 16 bits
-                // printf("Before swap op, swap frame %u, entry %u\n", 
-                //     free_swap_frame,
-                //     vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff);
-                vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] = 
-                    (vm->invert_page_table[victim_frame] >> 16) |
-                    (vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff0000);
-                // printf("After swap op, swap frame %u, entry %u\n", 
-                //     free_swap_frame,
-                //     vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff);
-            } else {
-                // higher 16 bits
-                // printf("Before swap op, swap frame %u, entry %u\n", 
-                //     free_swap_frame,
-                //     vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] >> 16);
-                vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] = 
-                    (vm->invert_page_table[victim_frame] & 0xffff0000) |
-                    (vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] & 0xffff);
-                // printf("After swap op, swap frame %u, entry %u\n", 
-                //     free_swap_frame,
-                //     vm->invert_page_table[free_swap_frame/2 + vm->PAGE_ENTRIES] >> 16);
-            }
+            vm->swap_table[free_swap_frame] = vm->invert_page_table[victim_frame] >> FRAME_BIT;
         }
         vm->invert_page_table[victim_frame] = entry;
-        // printf("After swap op, victim frame %u, entry %u\n", 
-        //     victim_frame,
-        //     vm->invert_page_table[victim_frame] >> 16);
         phy_addr = (victim_frame << 5) | (addr & 0x1f);
-        // printf("Swap physical fram %u to swap frame %u, ", victim_frame, free_swap_frame);
-        // printf("logical frame at %u is %u\n", victim_frame, entry>>16);
     }
     // increment time counter
     if (new_phy_frame) {
