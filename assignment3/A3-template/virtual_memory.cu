@@ -87,7 +87,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
             if ((vm->invert_page_table[i] & COUNTER_MASK) > 1) {
                 // use a new frame (last active frame different than this one)
                 new_phy_frame = true;
-                vm->invert_page_table[i] &= (!COUNTER_MASK); // set the counter to 0, so it can be increamented to 1 at the end
+                vm->invert_page_table[i] &= (~COUNTER_MASK); // set the counter to 0, so it can be increamented to 1 at the end
             } else {
                 vm->invert_page_table[i] = entry + 1;
             }
@@ -107,7 +107,8 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     }
     if (found_page == false) {
         // page fault
-        (*vm->pagefault_num_ptr)++;
+        // (*vm->pagefault_num_ptr)++;
+        atomicAdd(vm->pagefault_num_ptr, 1);
         // swap page (page at victim frame) from storage
         new_phy_frame = true;
         // if ((vm->invert_page_table[victim_frame] & COUNTER_MASK) > 1) {

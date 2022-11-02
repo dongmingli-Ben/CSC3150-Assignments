@@ -16,11 +16,11 @@ __device__ void print_page_table(VirtualMemory *vm) {
 
 // __device__ void user_program(VirtualMemory *vm, uchar *input, uchar *results,
 //                                                          int input_size) {
-//     // print_page_table(vm);
 //     for (int i = 0; i < input_size; i++) {
 //         vm_write(vm, i, input[i]);
 //     }
 //     printf("Finish writing\n");
+//     // print_page_table(vm);
 //     for (int i = input_size - 1; i >= input_size - 32769; i--)
 //         int value = vm_read(vm, i);
 //     printf("Finish reading\n");
