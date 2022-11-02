@@ -1,8 +1,8 @@
 ﻿#include "virtual_memory.h"
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
 // debug
 __device__ void print_page_table_debug(VirtualMemory *vm) {
   u32 entry;
@@ -11,7 +11,7 @@ __device__ void print_page_table_debug(VirtualMemory *vm) {
     printf("Physical mem frame %u stores logical page %u, counter %u\n", i, entry>>11, entry & 0x7ff);
   }
   for (u32 i = 0; i < vm->SWAP_ENTRIES; i++) {
-    printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i] >> 11);
+    printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i]);
   }
 }
 
@@ -85,7 +85,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
             found_page = true;
             // set counter
             if ((vm->invert_page_table[i] & COUNTER_MASK) > 1) {
-                // use a new frame
+                // use a new frame (last active frame different than this one)
                 new_phy_frame = true;
                 vm->invert_page_table[i] &= (!COUNTER_MASK); // set the counter to 0, so it can be increamented to 1 at the end
             } else {
@@ -109,9 +109,10 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         // page fault
         (*vm->pagefault_num_ptr)++;
         // swap page (page at victim frame) from storage
-        if ((vm->invert_page_table[victim_frame] & COUNTER_MASK) > 1) {
-            new_phy_frame = true;
-        }
+        new_phy_frame = true;
+        // if ((vm->invert_page_table[victim_frame] & COUNTER_MASK) > 1) {
+        //     new_phy_frame = true;
+        // }
         for (int i = 0; i < vm->SWAP_ENTRIES; i++) {
             if ((vm->swap_table[i] >> 31) == 1) {
                 // swap frame not used yet
@@ -155,7 +156,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     if (!found_page && !write) {
         // invalid page (haven't been written)
         printf("page num %u, addr %u, entry %u haven't been used yet, cannot read, segmentation fault\n", 
-            addr >> 5, addr, entry >> 16);
+            addr >> 5, addr, entry >> FRAME_BIT);
         print_page_table_debug(vm);
         assert(0);
     } else if (!found_page) {
@@ -200,8 +201,8 @@ __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
                                                         int input_size) {
     /* Complete snapshot function togther with vm_read to load elements from data
      * to result buffer */
-    for (int i = offset; i < input_size; i++) {
-        results[i-offset] = vm_read(vm, i);
+    for (int i = 0; i < input_size; i++) {
+        results[i] = vm_read(vm, i+offset);
     }
 }
 
