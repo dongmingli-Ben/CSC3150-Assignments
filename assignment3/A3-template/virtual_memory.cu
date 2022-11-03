@@ -71,6 +71,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     u32 phy_addr;
     /* search in inverted page table */
     // also search for the LRU physical frame
+    uchar tmp; // used as temporary to swap data
     u32 time = 0;
     u32 victim_frame = 0;
     u32 free_swap_frame = 1 << 31;
@@ -111,9 +112,6 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         atomicAdd(vm->pagefault_num_ptr, 1);
         // swap page (page at victim frame) from storage
         new_phy_frame = true;
-        // if ((vm->invert_page_table[victim_frame] & COUNTER_MASK) > 1) {
-        //     new_phy_frame = true;
-        // }
         for (int i = 0; i < vm->SWAP_ENTRIES; i++) {
             if ((vm->swap_table[i] >> 31) == 1) {
                 // swap frame not used yet
@@ -132,17 +130,12 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                     }
                 } else {
                     // replace LRU page
-                    uchar tmp_data[32];  // temporary physical frame data
-                    for (int j = 0; j < 32; j++) {
-                        tmp_data[j] = vm->storage[32*i+j];
-                    }
                     // move victim data into storage
-                    for (int j = 0; j < 32; j++) {
-                        vm->storage[32*i+j] = vm->buffer[32*victim_frame+j];
-                    }
                     // move tmp data into mem
                     for (int j = 0; j < 32; j++) {
-                        vm->buffer[32*victim_frame+j] = tmp_data[j];
+                        tmp = vm->storage[32*i+j];
+                        vm->storage[32*i+j] = vm->buffer[32*victim_frame+j];
+                        vm->buffer[32*victim_frame+j] = tmp;
                     }
                     // modify page table to manage swap entry
                     vm->swap_table[i] = vm->invert_page_table[victim_frame] >> FRAME_BIT;

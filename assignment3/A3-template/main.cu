@@ -93,7 +93,7 @@ int main() {
   /* Launch kernel function in GPU, with single thread
   and dynamically allocate INVERT_PAGE_TABLE_SIZE bytes of share memory,
   which is used for variables declared as "extern __shared__" */
-  mykernel<<<1, 1, INVERT_PAGE_TABLE_SIZE>>>(input_size);
+  mykernel<<<1, 4, INVERT_PAGE_TABLE_SIZE>>>(input_size);
 
   cudaStatus = cudaGetLastError();
   if (cudaStatus != cudaSuccess) {
