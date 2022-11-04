@@ -141,6 +141,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                         vm->buffer[32*victim_frame+j] = tmp;
                     }
                     // modify page table to manage swap entry
+                    // since the valid bit from ipt should be zero, no need to handle it
                     vm->swap_table[i] = vm->invert_page_table[victim_frame] >> FRAME_BIT;
                 }
                 vm->invert_page_table[victim_frame] = entry;
@@ -169,6 +170,7 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
                 vm->storage[32*free_swap_frame+j] = vm->buffer[32*victim_frame+j];
             }
             // modify page table
+            // since the valid bit from ipt should be zero, no need to handle it
             vm->swap_table[free_swap_frame] = vm->invert_page_table[victim_frame] >> FRAME_BIT;
         }
         vm->invert_page_table[victim_frame] = entry;
