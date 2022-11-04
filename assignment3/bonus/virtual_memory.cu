@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include <assert.h>
 #include <stdio.h>
+
+#ifdef DEBUG
 // debug
 __device__ void print_page_table_debug(VirtualMemory *vm) {
   u32 entry;
@@ -14,6 +16,7 @@ __device__ void print_page_table_debug(VirtualMemory *vm) {
     printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i]);
   }
 }
+#endif
 
 __device__ void init_invert_page_table(VirtualMemory *vm) {
 
@@ -151,7 +154,9 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         // invalid page (haven't been written)
         printf("page num %u, addr %u, entry %u haven't been used yet, cannot read, segmentation fault\n", 
             addr >> 5, addr, entry >> FRAME_BIT);
+#ifdef DEBUG
         print_page_table_debug(vm);
+#endif
         assert(0);
     } else if (!found_page) {
         // write mode, use free swap frame to hold victim page
