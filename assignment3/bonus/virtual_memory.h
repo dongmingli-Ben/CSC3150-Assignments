@@ -1,6 +1,10 @@
 ﻿#ifndef VIRTUAL_MEMORY_H
 #define VIRTUAL_MEMORY_H
 
+#define VER1
+#define TEST1
+// #define DEBUG
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <inttypes.h>
@@ -33,5 +37,10 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr);
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value);
 __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
                             int input_size);
+
+#ifdef DEBUG
+#include <stdio.h>
+__device__ void print_page_table_debug(VirtualMemory *vm);
+#endif
 
 #endif

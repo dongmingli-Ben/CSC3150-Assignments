@@ -2,21 +2,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#define TEST1
-
-#ifdef DEBUG
-#include <stdio.h>
-__device__ void print_page_table(VirtualMemory *vm) {
-  u32 entry;
-  for (u32 i = 0; i < vm->PAGE_ENTRIES; i++) {
-    entry = vm->invert_page_table[i];
-    printf("Physical mem frame %u stores logical page %u, counter %u\n", i, entry>>11, entry & 0x7ff);
-  }
-  for (u32 i = 0; i < vm->SWAP_ENTRIES; i++) {
-    printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i]);
-  }
-}
-#endif
 
 #ifdef TEST1
 __device__ void user_program(VirtualMemory *vm, uchar *input, uchar *results,

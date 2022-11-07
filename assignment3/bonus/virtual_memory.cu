@@ -10,10 +10,12 @@ __device__ void print_page_table_debug(VirtualMemory *vm) {
   u32 entry;
   for (u32 i = 0; i < vm->PAGE_ENTRIES; i++) {
     entry = vm->invert_page_table[i];
-    printf("Physical mem frame %u stores logical page %u, counter %u\n", i, entry>>11, entry & 0x7ff);
+    printf("Physical mem frame %u stores logical page %u, counter %u, pid %u\n", 
+        i, (entry>>11) & 0x1fff, entry & 0x7ff, entry >> 29);
   }
   for (u32 i = 0; i < vm->SWAP_ENTRIES; i++) {
-    printf("Swap mem frame %u stores logical page %u\n", i, vm->swap_table[i]);
+    printf("Swap mem frame %u stores logical page %u, pid %u\n", 
+        i, vm->swap_table[i] & 0x1fff, vm->swap_table[i] >> 13);
   }
 }
 #endif
@@ -69,7 +71,11 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
     u32 PAGE_MASK = 0x1fff;
     u32 COUNTER_MASK = 0x7ff;
     assert(PAGE_BIT + FRAME_BIT < 29); // otherwise u32 is not enough to hold an entry
+#ifdef VER2
     u32 pid = 0;
+#else
+    u32 pid = threadIdx.x;
+#endif
     u32 entry = (((addr >> 5) & PAGE_MASK) << FRAME_BIT) | (pid << 29);
     u32 phy_addr;
     /* search in inverted page table */
@@ -162,6 +168,9 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
         // write mode, use free swap frame to hold victim page
         if ((free_swap_frame >> 31) == 1) {
             printf("swap memory used up\n");
+#ifdef DEBUG
+            print_page_table_debug(vm);
+#endif
             assert(0);
         }
         if (!found_free) {
@@ -186,14 +195,31 @@ __device__ u32 vm_map_physical(VirtualMemory *vm, u32 addr, bool write) {
 
 __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
     /* Complate vm_read function to read single element from data buffer */
+#ifdef VER1
+    if ((addr>>5)%4 == threadIdx.x) {
+        u32 phy_addr = vm_map_physical(vm, addr, true);
+        return vm->buffer[phy_addr];
+    }
+    return 0;
+#endif
+#ifdef VER2
     u32 phy_addr = vm_map_physical(vm, addr, false);
     return vm->buffer[phy_addr]; //TODO
+#endif
 }
 
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
     /* Complete vm_write function to write value into data buffer */
+#ifdef VER1
+    if ((addr>>5)%4 == threadIdx.x) {
+        u32 phy_addr = vm_map_physical(vm, addr, true);
+        vm->buffer[phy_addr] = value;
+    }
+#endif
+#ifdef VER2
     u32 phy_addr = vm_map_physical(vm, addr, true);
     vm->buffer[phy_addr] = value;
+#endif
 }
 
 __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
@@ -201,7 +227,19 @@ __device__ void vm_snapshot(VirtualMemory *vm, uchar *results, int offset,
     /* Complete snapshot function togther with vm_read to load elements from data
      * to result buffer */
     for (int i = 0; i < input_size; i++) {
+#ifdef VER1
+        if ((i>>5)%4 == threadIdx.x) {
+            results[i] = vm_read(vm, i+offset);
+        }
+#endif
+#ifdef VER2
         results[i] = vm_read(vm, i+offset);
+#endif
+#ifdef VER3
+        if (threadIdx.x == 0) {
+            results[i] = vm_read(vm, i+offset);
+        }
+#endif
     }
 }
 
