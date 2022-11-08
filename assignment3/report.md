@@ -4,11 +4,17 @@
 
 The cluster provided for this assignment with GPU.
 
-## Steps  to Execute
+## Steps to Execute
+
+### Main Task
 
 1. go to the corresponding directory (```source``` for main task, ```bonus``` for bonus task)
 2. change the ```user_program``` of  ```user_program.cu``` into the test functions. Note that I use some macros to manage my own tests. You can remove the ```TEST1``` macro and replaces the user_program with testcases. You do not need to remove the ```DEBUG``` macro, it manages error message printing. However, the result should not be different if you define ```DEBUG```.
 3. in bash, type in ```sbatch slurm.sh```
+
+### Bonus
+
+It is the same except at step 2, you need to specify a macro for version 1 or version 2 implementation. The macro is defined in virtual_memory.h. Note that **Version 3** is not ready yet.
 
 ## Design
 
@@ -102,10 +108,18 @@ write: set the content at physical address to specified value.
 
 ### Bonus
 
-I implement version 2. Since each thread does the same thing and they overwrite each other, nothing is changed from the main task except:
+#### Version 1
+
+Since CUDA is SIMT, we need a lock or something equivalent to stop other threads from overwriting IPT and swap table when one thread is searching for its physical address. However, in my implementation, overwriting is avoided by allowing one thread to read/write every time and other threads just wait and do nothing. This is achieved by assigning the job according to the logical page number of the address. For example, 4k pages are assigned to thread 0. When reading/writing from/to 4k page, only thread 0 is working while other 3 threads do nothing (directly return).
+
+#### Version 2
+
+Since each thread does the same thing and they overwrite each other, nothing is changed from the main task except:
 
 1. ```my_kernel<<<1, 4, INVERT_PAGE_TABLE_SIZE>>>(input_size);``` (launch 4 threads within the same warp)
 2. ```atomicAdd(vm->pagefault_num_ptr, 1);``` (so that increments on page fault number will not overwrite each other)
+
+Then, since CUDA GPUs are SIMT in nature, threads of the same warp always execute the same instruction. Therefore, there will be data racing between different threads. Luckily, since different threads are doing the exact same task, it does not matter which thread eventually writes its data to buffer, storage, IPT, or swap table.
 
 ## Output (Page Fault Number)
 
@@ -139,6 +153,12 @@ Total page faults: 4K+1023+4K=9215
 
 ### Bonus
 
+#### Version 1
+
+Since it is exactly the same as the main task except that the jobs are divided into 4 threads (no concurrency at all), the page fault number should be the same. Therefore, it is 8193 and 9215 respectively.
+
+#### Version 2
+
 Since the four threads are doing the same thing and overwrite each other, the page fault number should be four times the single-thread one. Hence, for the original test program: 32772. For the additional test program: 36860.
 
 ## Problems
@@ -161,9 +181,17 @@ Use a temporary ``uchar`` on register to perform swapping contents between physi
 
 ### Bonus
 
-![image](screenshots/bonus-original.png)
+#### Version 2
 
-![image](screenshots/bonus-additional.png)
+![image](screenshots/bonus-ver-1-original.png)
+
+![image](screenshots/bonus-ver-1-additional.png)
+
+#### Version 2
+
+![image](screenshots/bonus-ver-2-original.png)
+
+![image](screenshots/bonus-ver-2-additional.png)
 
 ## Lesson Learned
 

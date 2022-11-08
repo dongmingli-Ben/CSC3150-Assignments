@@ -1,8 +1,8 @@
 ﻿#ifndef VIRTUAL_MEMORY_H
 #define VIRTUAL_MEMORY_H
 
-#define VER1
-#define TEST1
+#define VER1 // VER3 is not ready
+// #define TEST1
 // #define DEBUG
 
 #include <cuda.h>

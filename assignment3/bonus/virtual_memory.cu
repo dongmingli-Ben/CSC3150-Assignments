@@ -4,6 +4,11 @@
 #include <assert.h>
 #include <stdio.h>
 
+#ifdef VER3
+// lock for page lookup and swapping
+__shared__ int lock;
+#endif
+
 #ifdef DEBUG
 // debug
 __device__ void print_page_table_debug(VirtualMemory *vm) {
@@ -206,6 +211,21 @@ __device__ uchar vm_read(VirtualMemory *vm, u32 addr) {
     u32 phy_addr = vm_map_physical(vm, addr, false);
     return vm->buffer[phy_addr]; //TODO
 #endif
+#ifdef VER3
+    u32 phy_addr;
+    // critical section
+    lock = 0;
+    bool acquire_lock = false;
+    while (!acquire_lock) {
+        if (atomicCAS(&lock, 0, 1) == 0) {
+            phy_addr = vm_map_physical(vm, addr, false);
+            // release the lock
+            acquire_lock = true;
+            atomicExch(&lock, 0);
+        }
+    }
+    return vm->buffer[phy_addr];
+#endif
 }
 
 __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
@@ -218,6 +238,20 @@ __device__ void vm_write(VirtualMemory *vm, u32 addr, uchar value) {
 #endif
 #ifdef VER2
     u32 phy_addr = vm_map_physical(vm, addr, true);
+    vm->buffer[phy_addr] = value;
+#endif
+#ifdef VER3
+    u32 phy_addr;
+    // critical section
+    bool acquire_lock = false;
+    while (!acquire_lock) {
+        if (atomicCAS(&lock, 0, 1) == 0) {
+            phy_addr = vm_map_physical(vm, addr, true);
+            // release the lock
+            acquire_lock = true;
+            atomicExch(&lock, 0);
+        }
+    }
     vm->buffer[phy_addr] = value;
 #endif
 }
