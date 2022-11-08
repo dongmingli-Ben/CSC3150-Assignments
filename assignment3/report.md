@@ -181,7 +181,7 @@ Use a temporary ``uchar`` on register to perform swapping contents between physi
 
 ### Bonus
 
-#### Version 2
+#### Version 1
 
 ![image](screenshots/bonus-ver-1-original.png)
 
