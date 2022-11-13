@@ -12,19 +12,19 @@ __device__ void fs_init(FileSystem *fs, uchar *volume, int SUPERBLOCK_SIZE,
 							int STORAGE_BLOCK_SIZE, int MAX_FILENAME_SIZE, 
 							int MAX_FILE_NUM, int MAX_FILE_SIZE, int FILE_BASE_ADDRESS)
 {
-  // init variables
-  fs->volume = volume;
+	// init variables
+	fs->volume = volume;
 
-  // init constants
-  fs->SUPERBLOCK_SIZE = SUPERBLOCK_SIZE;
-  fs->FCB_SIZE = FCB_SIZE;
-  fs->FCB_ENTRIES = FCB_ENTRIES;
-  fs->STORAGE_SIZE = VOLUME_SIZE;
-  fs->STORAGE_BLOCK_SIZE = STORAGE_BLOCK_SIZE;
-  fs->MAX_FILENAME_SIZE = MAX_FILENAME_SIZE;
-  fs->MAX_FILE_NUM = MAX_FILE_NUM;
-  fs->MAX_FILE_SIZE = MAX_FILE_SIZE;
-  fs->FILE_BASE_ADDRESS = FILE_BASE_ADDRESS;
+	// init constants
+	fs->SUPERBLOCK_SIZE = SUPERBLOCK_SIZE;
+	fs->FCB_SIZE = FCB_SIZE;
+	fs->FCB_ENTRIES = FCB_ENTRIES;
+	fs->STORAGE_SIZE = VOLUME_SIZE;
+	fs->STORAGE_BLOCK_SIZE = STORAGE_BLOCK_SIZE;
+	fs->MAX_FILENAME_SIZE = MAX_FILENAME_SIZE;
+	fs->MAX_FILE_NUM = MAX_FILE_NUM;
+	fs->MAX_FILE_SIZE = MAX_FILE_SIZE;
+	fs->FILE_BASE_ADDRESS = FILE_BASE_ADDRESS;
 
 }
 
