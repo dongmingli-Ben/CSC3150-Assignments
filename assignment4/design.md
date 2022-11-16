@@ -23,7 +23,7 @@ Volume sizes:
 FCB content (contiguous allocation): 32B
 
 - file name 20B
-- start block: >= 15 bits
-- file size -> num blocks: >= 10 bits
-- modified time: counter/timestamp, counter: >= 10 bits
+- start block: >= 15 bits; main: 4B
+- file size -> num blocks: >= 10 bits; main: 4B
+- modified time: counter/timestamp, counter: >= 10 bits; main: 4B
 - bonus tree directory: index to parent dir: >= 10 bits
