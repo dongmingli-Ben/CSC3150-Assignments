@@ -27,6 +27,8 @@ __device__ void fs_init(FileSystem *fs, uchar *volume, int SUPERBLOCK_SIZE,
 	fs->MAX_FILE_SIZE = MAX_FILE_SIZE;
 	fs->FILE_BASE_ADDRESS = FILE_BASE_ADDRESS;
 
+	fs->CUR_DIR_FCB_INDEX = NULL_FCB_INDEX;
+	// printf("%u\n", fs->CUR_DIR_FCB_INDEX);
 }
 
 
@@ -40,36 +42,24 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 	u32 block_id;
 	u32 fcb_index;
 	char * filename;
-	fcb_index = fs_search_by_name(fs, s);
-	if (fcb_index == 0x8000000) {
+	fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
+	if (fcb_index == NULL_FCB_INDEX) {
 		// fcb not found, and no free fcb
 		printf("Cannot create file %s due to OOM\n", s);
 		assert(0);
 	}
 	fcb = fs_get_fcb(fs, fcb_index);
-	filename = fcb_get_filename(fcb);
 	// printf("%s - %s : %d\n", filename, s, my_strcmp(filename, s));
-	if (my_strcmp(filename, s) != 0) {
+	if (!fcb_is_valid(fcb)) {
 		// not found
 		if (op == G_READ) {
 			printf("%s does not exist!\n", s);
 			assert(0);
 		}
 		// create file if not exist
-		assert(my_strlen(s) < 20);
-		my_strcpy(filename, s);
-		// allocate free blocks
-		block_id = fs_search_freeblock(fs);
-		fcb_get_filesize(fcb) = 0;  // return a reference
-		fcb_get_start_block(fcb) = block_id;
-		fs_set_superblock(fs, block_id, 1);  // 1 ==> used
-		// increment global time
-		gtime++;
-		assert((gtime >> 16) == 0);
-		// set modified time and created time
-		fcb_get_modified_time(fcb) = gtime; // return a reference
-		fcb_get_created_time(fcb) = gtime; // return a reference
-	} 
+		fs_create_pseudo_file(fs, fcb, s, fs->CUR_DIR_FCB_INDEX, 0);
+	}
+	// print_fcb(fcb);
 	return fcb_index;
 }
 
@@ -80,11 +70,10 @@ __device__ void fs_read(FileSystem *fs, uchar *output, u32 size, u32 fp)
 {
 	/* Implement read operation here */
 	uchar * fcb;
-	u32 filesize, block_id;
+	u32 filesize;
 	fcb = fs_get_fcb(fs, fp);
 	filesize = fcb_get_filesize(fcb);
-	block_id = fcb_get_start_block(fcb);
-	u32 pointer = fs->FILE_BASE_ADDRESS + block_id*(fs->STORAGE_BLOCK_SIZE);
+	u32 pointer = fs_get_file_data_index(fs, fcb);
 	for (int i = 0; i < size; i++) {
 		if (i >= filesize) {
 			printf("Read EOF, stop reading\n");
@@ -92,9 +81,6 @@ __device__ void fs_read(FileSystem *fs, uchar *output, u32 size, u32 fp)
 		}
 		output[i] = fs->volume[pointer+i];
 	}
-	// // set modified time
-	// gtime++;
-	// fcb_get_modified_time(fcb) = gtime;
 }
 
 /*
@@ -105,14 +91,12 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	/* Implement write operation here */
 	assert(size <= (1 << 10));
 	uchar * fcb;
-	u32 block_id;
 	fcb = fs_get_fcb(fs, fp);
 	// clean up old content
 	fs_rm_file_content(fs, fcb); // set bitmap (optional)
 	fcb_get_filesize(fcb) = 0;
 	// start writing data to file
-	block_id = fcb_get_start_block(fcb);
-	u32 pointer = fs->FILE_BASE_ADDRESS + block_id*(fs->STORAGE_BLOCK_SIZE);
+	u32 pointer = fs_get_file_data_index(fs, fcb);
 	for (int i = 0; i < size; i++) {
 		fs->volume[pointer+i] = input[i];
 	}
@@ -122,35 +106,317 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	gtime++;
 	assert((gtime >> 16) == 0);
 	fcb_get_modified_time(fcb) = gtime;
+	// print_fcb(fs, fcb);
 	return 0;
 }
 __device__ void fs_gsys(FileSystem *fs, int op)
 {
 	/* Implement LS_D and LS_S operation here */
-	uchar *fcbs[1024];
+	switch (op)
+	{
+	case LS_D:
+		fs_ls(fs, op);
+		break;
+	case LS_S:
+		fs_ls(fs, op);
+		break;
+	case CD_P:
+		fs_cd_parent_dir(fs);
+		break;
+	case PWD:
+		fs_print_pwd(fs);
+		break;
+	default:
+		printf("%d not recognized\n", op);
+	}
+}
+
+__device__ void fs_gsys(FileSystem *fs, int op, char *s)
+{
+	/* Implement rm operation here */
+	switch (op)
+	{
+	case RM:
+		fs_rm_file(fs, s);
+		break;
+	case RM_RF:
+		fs_rm_dir(fs, s);
+		break;
+	case CD:
+		fs_cd_child_dir(fs, s);
+		break;
+	case MKDIR:
+		fs_mkdir(fs, s);
+		break;
+	default:
+		printf("%d not recognized\n", op);
+		assert(0);
+	}
+}
+
+/*
+linux mkdir equivalent
+*/
+__device__ void fs_mkdir(FileSystem *fs, char *s) {
+	uchar * parent_fcb = fs_get_fcb(fs, fs->CUR_DIR_FCB_INDEX);
+	u32 fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
+	uchar * fcb = fs_get_fcb(fs, fcb_index);
+	if (fcb_is_valid(fcb)) {
+		printf("Directory %s exists! Cannot create dir.\n", s);
+		assert(0);
+	}
+	fs_create_pseudo_file(fs, fcb, s, fs->CUR_DIR_FCB_INDEX, 1);
+}
+
+/*
+Create a pseudo file, including file and dir.
+It sets up the FCB for the pseudo file, and the parent dir content.
+op: 0 ==> create a file, 1 ==> create a dir
+*/
+__device__ void fs_create_pseudo_file(
+		FileSystem *fs, 
+		uchar *fcb, 
+		char * name, 
+		u32 parent_fcb_index, 
+		int op) {
+	assert(my_strlen(name) < 20);
+	my_strcpy(fcb_get_filename(fcb), name);
+	// allocate free blocks
+	u32 block_id = fs_search_freeblock(fs);
+	fcb_get_filesize(fcb) = 0;  // return a reference
+	fcb_get_start_block(fcb) = block_id;
+	fs_set_superblock(fs, block_id, 1);  // 1 ==> used
+	fcb_is_directory(fcb) = op;
+	fcb_get_parent_fcb_index(fcb) = parent_fcb_index;
+	// increment global time
+	gtime++;
+	assert((gtime >> 16) == 0);
+	// set modified time and created time
+	fcb_get_modified_time(fcb) = gtime; // return a reference
+	fcb_get_created_time(fcb) = gtime; // return a reference
+	// update parent file content
+	if (parent_fcb_index != NULL_FCB_INDEX) {
+		uchar * parent_fcb = fs_get_fcb(fs, parent_fcb_index);
+		fs_write_append(fs, parent_fcb, name);
+		fs_write_append(fs, parent_fcb, '\0');
+		fcb_get_modified_time(parent_fcb) = gtime; // return a reference
+	}
+	// print_fcb(fs, fcb);
+}
+
+/*
+Write one character to the end of file.
+It handles bitmap and fcb automatically.
+
+NOTE: Check is performed on whether the next block is used
+by another file. By design, this situation should not happen.
+*/
+__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char input) {
+	u32 block_id, length, size;
+	size = fcb_get_filesize(fcb) + 1;
+	fcb_get_filesize(fcb) = size;
+	length = size / fs->STORAGE_BLOCK_SIZE;
+	if (size % fs->STORAGE_BLOCK_SIZE) {
+		length++;
+	}
+	block_id = fcb_get_start_block(fcb);
+	assert(fs_is_block_free(fs, block_id+length-1));
+	u32 pointer = fs_get_file_data_index(fs, fcb);
+	fs->volume[pointer+size-1] = input;
+	// update fcb and bit map
+	fs_update_size(fs, fcb, size);
+}
+
+/*
+Write to the end of file.
+It handles bitmap and fcb automatically.
+
+NOTE: Check is performed on whether the next block is used
+by another file. By design, this situation should not happen.
+*/
+__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char * input) {
+	u32 block_id, length, size;
+	size = fcb_get_filesize(fcb) + my_strlen(input);
+	fcb_get_filesize(fcb) = size;
+	length = size / fs->STORAGE_BLOCK_SIZE;
+	if (size % fs->STORAGE_BLOCK_SIZE) {
+		length++;
+	}
+	block_id = fcb_get_start_block(fcb);
+	assert(fs_is_block_free(fs, block_id+length-1));
+	u32 pointer = fs_get_file_data_index(fs, fcb);
+	for (int i = 0; i < my_strlen(input); i++) {
+		fs->volume[pointer+size-my_strlen(input)+i] = input[i];
+	}
+	// update fcb and bit map
+	fs_update_size(fs, fcb, size);
+}
+
+/*
+Set the CUR_DIR_FCB_INDEX accordingly
+*/
+__device__ void fs_cd_parent_dir(FileSystem *fs) {
+	if (fs->CUR_DIR_FCB_INDEX == NULL_FCB_INDEX) {
+		printf("You are at the root directory. Cannot go to parent dir.\n");
+		assert(0);
+	}
 	uchar * fcb;
+	fcb = fs_get_fcb(fs, fs->CUR_DIR_FCB_INDEX);
+	fs->CUR_DIR_FCB_INDEX = fcb_get_parent_fcb_index(fcb);
+}
+
+/*
+linux equivalent of cd
+*/
+__device__ void fs_cd_child_dir(FileSystem *fs, char *s) {
+	fs->CUR_DIR_FCB_INDEX = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
+}
+
+/*
+Print the current directory
+*/
+__device__ void fs_print_pwd(FileSystem *fs) {
+	const uchar * dir_stack[3]; // store fcb entry
+	int cur_dir_fcb_index = fs->CUR_DIR_FCB_INDEX;
+	int i = 0;
+	const uchar * fcb;
+	while (cur_dir_fcb_index != NULL_FCB_INDEX) {
+		fcb = fs_get_fcb(fs, cur_dir_fcb_index);
+		dir_stack[i] = fcb;
+		cur_dir_fcb_index = fcb_get_parent_fcb_index(fcb);
+		i++;
+	}
+	i--;
+	printf("/root");
+	while (i >= 0) {
+		printf("/%s", fcb_get_filename(dir_stack[i]));
+		i--;
+	}
+	printf("\n");
+}
+
+/*
+Remove a directory
+*/
+__device__ void fs_rm_dir(FileSystem *fs, char *s) {
+	uchar * fcb;
+	u32 fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
+	if (fcb_index == NULL_FCB_INDEX || !fcb_is_valid(fs_get_fcb(fs, fcb_index))) {
+		printf("Directory to be removed %s not found at ", s);
+		fs_print_pwd(fs);
+		assert(0);
+	}
+	fcb = fs_get_fcb(fs, fcb_index);
+	// print_fcb(fs, fcb);
+	// remove cur dir and sub dirs
+	int level = 0;
+	u32 dir_stack[3] = {NULL_FCB_INDEX, NULL_FCB_INDEX, NULL_FCB_INDEX}; // for post order traversal, store fcb index
+	// starting from the root for the sub-tree to be removed
+	dir_stack[level] = fcb_index;
+	while (dir_stack[level] != NULL_FCB_INDEX) {
+		fcb_index = fs_get_first_child(fs, dir_stack[level]);
+		fcb = fs_get_fcb(fs, fcb_index);
+		if (fcb_index == NULL_FCB_INDEX || !fcb_is_valid(fcb)) {
+			// empty directory
+			fs_rm_pseudo_file(fs, fs_get_fcb(fs, dir_stack[level]));
+			dir_stack[level] = NULL_FCB_INDEX;
+			level--;
+		}
+		if (!fcb_is_directory(fcb)) {
+			fs_rm_pseudo_file(fs, fcb);
+		}
+		// add dir to stack
+		level++;
+		dir_stack[level] = fcb_index;
+	}
+}
+
+/*
+Remove a file, cannot remove directories.
+
+Need to update parent dir FCB too.
+*/
+__device__ void fs_rm_file(FileSystem *fs, char *s) {
+	printf("--------------cur dir index-----------------\n");
+	printf("%u\n", fs->CUR_DIR_FCB_INDEX);
+	printf("--------------end ofcur dir index-----------------\n");
+	uchar * fcb;
+	u32 fcb_index;
+	fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
+	fcb = fs_get_fcb(fs, fcb_index);
+	if (fcb_is_directory(fcb)) {
+		printf("Cannot remove directory with RM\n");
+		assert(0);
+	}
+	fs_rm_pseudo_file(fs, fcb);
+}
+
+/*
+Remove a pseudo file, including files and directories.
+It clears the file content and update the content of parent dir.
+
+You can remove an empty dir with it.
+*/
+__device__ void fs_rm_pseudo_file(FileSystem *fs, uchar *fcb) {
+	// print_fcb(fs, fcb);
+	u32 fcb_index;
+	char * name = fcb_get_filename(fcb);
+	// set bit map
+	fs_rm_file_content(fs, fcb);
+	// update parent FCB and remove fcb
+	fcb_index = fcb_get_parent_fcb_index(fcb);
+	memset(fcb, 0, 32);
+	fcb = fs_get_fcb(fs, fcb_index); // parent fcb
+	uchar *start;
+	int length;
+	uchar * file_content;
+	file_content = &fs->volume[fs_get_file_data_index(fs, fcb)];
+	start = (uchar *) my_strstr((char *)file_content, name);
+	length = my_strlen(name);
+	memcpy(start, start+length+1, 20-(start-file_content)-length-1); // -1 for "\0"
+	memset(file_content+32-length, 0, length);
+}
+
+/*
+Return the pointer (index of fs->volume) to the data block
+*/
+__device__ u32 fs_get_file_data_index(FileSystem *fs, uchar *fcb) {
+	u32 block_id = fcb_get_start_block(fcb);
+	u32 pointer = fs->FILE_BASE_ADDRESS + block_id*(fs->STORAGE_BLOCK_SIZE);
+	return pointer;
+}
+
+/*
+Return the index of fcb entry of first children of the dir.
+If no children is found, return nullptr
+*/
+__device__ u32 fs_get_first_child(FileSystem *fs, u32 fcb_index) {
+	printf("warning: not sure about the implementation\n");
+	u32 pointer = fs_get_file_data_index(fs, fs_get_fcb(fs, fcb_index));
+	uchar * pt = &fs->volume[pointer];
+	fcb_index = fs_search_by_name(fs, (char *)pt, fcb_index);
+	return fcb_index;
+}
+
+/*
+Perform ls
+*/
+__device__ void fs_ls(const FileSystem * fs, int op) {
+	const uchar *fcbs[50];
+	const uchar * fcb;
 	int file_num = 0;
 	// loop over fcb
 	for (int i = 0; i < fs->FCB_ENTRIES; i++) {
 		fcb = fs_get_fcb(fs, i);
-		if (!fcb_is_valid(fcb)) {
+		if (!fcb_is_valid(fcb) || fcb_get_parent_fcb_index(fcb) != fs->CUR_DIR_FCB_INDEX) {
 			continue;
 		}
 		fcbs[file_num] = fcb;
 		file_num++;
 	}
 	// sort
-	// debug
-	// for (int i = 0; i < file_num; i++) {
-	// 	if (my_strcmp(fcb_get_filename(fcbs[i]), "EA\0") == 0) {
-	// 		printf("--------DEBUG MESSAGE------------\n");
-	// 		printf("%s %u\n", fcb_get_filename(fcbs[i]),
-	// 			fcb_get_filesize(fcbs[i]));
-	// 		printf("--------DEBUG MESSAGE------------\n");
-	// 	}
-	// }
 	// bubble sort
-	uchar * tmp;
+	const uchar * tmp;
 	bool swap = false;
 	for (int i = 0; i < file_num; i++) {
 		for (int j = 0; j < file_num-1-i; j++) {
@@ -182,31 +448,22 @@ __device__ void fs_gsys(FileSystem *fs, int op)
 	}
 	// print to console
 	if (op == LS_D) {
-		printf("===sort by modified time===\n");
+		printf("Sorted %d files by modified time:\n", file_num);
 	} else {
-		printf("===sort by file size===\n");
+		printf("Sort %d by file size:\n", file_num);
 	}
 	for (int i = 0; i < file_num; i++) {
 		if (op == LS_D) {
-			printf("%s\n", fcb_get_filename(fcbs[i]));
+			printf("%s\t%u", fcb_get_filename(fcbs[i]), fcb_get_modified_time(fcbs[i]));
 		} else {
-			printf("%s %u\n", fcb_get_filename(fcbs[i]), fcb_get_filesize(fcbs[i]));
+			printf("%s\t%u", fcb_get_filename(fcbs[i]), fcb_get_filesize(fcbs[i]));
+		}
+		if (fcb_is_directory(fcbs[i])) {
+			printf("\td\n");
+		} else {
+			printf("\n");
 		}
 	}
-}
-
-__device__ void fs_gsys(FileSystem *fs, int op, char *s)
-{
-	/* Implement rm operation here */
-	assert(op == RM);
-	uchar * fcb;
-	u32 fcb_index;
-	fcb_index = fs_search_by_name(fs, s);
-	fcb = fs_get_fcb(fs, fcb_index);
-	// set bit map
-	fs_rm_file_content(fs, fcb);
-	// remove fcb
-	memset(fcb, 0, 32);
 }
 
 /*
@@ -284,26 +541,50 @@ __device__ bool fcb_is_valid(const uchar * fcb) {
 Return a reference to the modified time
 */
 __device__ unsigned short & fcb_get_modified_time(const uchar * fcb) {
-	u32 * ints = (u32 *) &(fcb[20]);
-	unsigned short * shorts = (unsigned short *) &(ints[2]);
-	return shorts[0];
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[2];
 }
 
 /*
 Return a reference to the created time
 */
 __device__ unsigned short & fcb_get_created_time(const uchar * fcb) {
-	u32 * ints = (u32 *) &(fcb[20]);
-	unsigned short * shorts = (unsigned short *) &(ints[2]);
-	return shorts[1];
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[3];
 }
 
 /*
 Return a reference to the start block id
 */
-__device__ u32 & fcb_get_start_block(const uchar * fcb) {
-	u32 * ints = (u32 *) &(fcb[20]);
-	return ints[0];
+__device__ unsigned short & fcb_get_start_block(const uchar * fcb) {
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[0];
+}
+
+/*
+Return a reference to the file size
+*/
+__device__ unsigned short & fcb_get_filesize(const uchar * fcb) {
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[1];
+}
+
+/*
+Return a reference to the parent FCB index
+*/
+__device__ unsigned short & fcb_get_parent_fcb_index(const uchar * fcb) {
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[4];
+}
+
+/*
+Return a reference to the bits that indicate whether 
+it is a directory.
+1: directory, 0: file
+*/
+__device__ unsigned short & fcb_is_directory(const uchar * fcb) {
+	unsigned short * shorts = (unsigned short *) &(fcb[20]);
+	return shorts[5];
 }
 
 /*
@@ -314,20 +595,12 @@ __device__ char * fcb_get_filename(const uchar * fcb) {
 }
 
 /*
-Return a reference to the file size
-*/
-__device__ u32 & fcb_get_filesize(const uchar * fcb) {
-	u32 * ints = (u32 *) &(fcb[20]);
-	return ints[1];
-}
-
-/*
 Search for a match entry in FCB.
 If no match is found, return a free FCB
 */
-__device__ u32 fs_search_by_name(const FileSystem *fs, const char *s) {
+__device__ u32 fs_search_by_name(const FileSystem *fs, const char *s, u32 parent_fcb_index) {
 	u32 fcb_index = 0;
-	u32 free_fcb = 0x80000000;
+	u32 free_fcb = NULL_FCB_INDEX;
 	const uchar * fcb;
 	char * name;
 	for (fcb_index = 0; fcb_index < fs->FCB_ENTRIES; fcb_index++) {
@@ -337,7 +610,7 @@ __device__ u32 fs_search_by_name(const FileSystem *fs, const char *s) {
 			continue;
 		}
 		name = fcb_get_filename(fcb);
-		if (my_strcmp(name, s) == 0) {
+		if (my_strcmp(name, s) == 0 && fcb_get_parent_fcb_index(fcb) == parent_fcb_index) {
 			return fcb_index;
 		}
 	}
@@ -358,6 +631,14 @@ __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op) {
 }
 
 /*
+Check the bit map
+*/
+__device__ bool fs_is_block_free(FileSystem *fs, u32 block_id) {
+	uchar position = block_id % 8;
+	return (fs->volume[block_id/8] >> (7-position)) & 1;
+}
+
+/*
 Search the bitmap to find a free block.
 If no free block available, return 0x8000000.
 
@@ -372,37 +653,40 @@ __device__ u32 fs_search_freeblock(const FileSystem *fs) {
 		if ((val >> 7) == 0) {
 			return 8*i;
 		}
-		// idx++;
-		// if ((val ^ 0xbf) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xdf) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xef) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xf7) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xfb) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xfd) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
-		// if ((val ^ 0xfe) == 0) {
-		// 	return idx;
-		// }
-		// idx++;
 	}
 	return 0x8000000;
+}
+
+// some debug functions
+
+__device__ void print_fcb(FileSystem *fs, uchar *fcb) {
+	printf("--------start of fcb----------\n");
+	if (fcb_is_directory(fcb)) {
+		printf("dir ");
+	} else {
+		printf("file ");
+	}
+	printf("name: %s\n", fcb_get_filename(fcb));
+	printf("start block id: %u\n", fcb_get_start_block(fcb));
+	printf("size: %u\n", fcb_get_filesize(fcb));
+	printf("modified time: %u\n", fcb_get_modified_time(fcb));
+	printf("created time: %u\n", fcb_get_created_time(fcb));
+	printf("parent fcb index: %u\n", fcb_get_parent_fcb_index(fcb));
+	printf("content: ");
+	u32 pointer = fs_get_file_data_index(fs, fcb);
+	u32 length = my_strlen((char *) &(fs->volume[pointer]));
+	int size = fcb_get_filesize(fcb);
+	while (size > 0) {
+		printf("%s", &fs->volume[pointer]);
+		size -= (length + 1);
+		pointer += (length + 1);
+		length = my_strlen((char *) &(fs->volume[pointer]));
+		if (size > 0 && length > 0) {
+			printf("\\0");
+		}
+	}
+	printf("\n");
+	printf("--------end of fcb----------\n");
 }
 
 // some standard C library functions
@@ -436,4 +720,31 @@ __device__ int (my_strcmp)(const char *s1, const char *s2)
 			return (0);
 	return (*(unsigned char *)s1 < *(unsigned char *)s2
 		? -1 : +1);
+	}
+
+__device__ char *(my_strstr)(const char *s1, const char *s2)
+	{	/* find first occurrence of s2[] in s1[] */
+	if (*s2 == '\0')
+		return ((char *)s1);
+	for (; (s1 = my_strchr(s1, *s2)) != NULL; ++s1)
+		{	/* match rest of prefix */
+		const char *sc1, *sc2;
+
+		for (sc1 = s1, sc2 = s2; ; )
+			if (*++sc2 == '\0')
+				return ((char *)s1);
+			else if (*++sc1 != *sc2)
+				break;
+		}
+	return (NULL);
+	}
+
+__device__ char *(my_strchr)(const char *s, int c)
+	{	/* find first occurrence of c in char s[] */
+	const char ch = c;
+
+	for (; *s != ch; ++s)
+		if (*s == '\0')
+			return (NULL);
+	return ((char *)s);
 	}

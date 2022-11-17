@@ -4,7 +4,8 @@
 
 Meta data:
 
-- modified time
+- modified time (for linux, the modified time for a directory is when a file is created or deleted under the directory)
+- created time
 - file size
 - file name
 
@@ -23,8 +24,9 @@ Volume sizes:
 FCB content (contiguous allocation): 32B
 
 - file name 20B
-- start block: >= 15 bits; main: 4B, bonus: 4B
+- start block: >= 15 bits; main: 4B, bonus: 2B
 - file size -> num blocks: >= 10 bits; main: 4B, bonus: 2B
 - modified time: counter/timestamp, counter: >= 10 bits; main: 2B
 - created time: counter/timestamp, counter: >= 10 bits; main: 2B
 - bonus tree directory: index to parent dir: >= 10 bits, bonus: 2B
+- directory indicator: 1 bit; bonus: 2B
