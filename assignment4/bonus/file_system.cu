@@ -28,7 +28,6 @@ __device__ void fs_init(FileSystem *fs, uchar *volume, int SUPERBLOCK_SIZE,
 	fs->FILE_BASE_ADDRESS = FILE_BASE_ADDRESS;
 
 	fs->CUR_DIR_FCB_INDEX = NULL_FCB_INDEX;
-	// printf("%u\n", fs->CUR_DIR_FCB_INDEX);
 }
 
 
@@ -39,9 +38,7 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 {
 	/* Implement open operation here */
 	uchar * fcb;
-	u32 block_id;
 	u32 fcb_index;
-	char * filename;
 	fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
 	if (fcb_index == NULL_FCB_INDEX) {
 		// fcb not found, and no free fcb
@@ -106,7 +103,6 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	gtime++;
 	assert((gtime >> 16) == 0);
 	fcb_get_modified_time(fcb) = gtime;
-	// print_fcb(fs, fcb);
 	return 0;
 }
 __device__ void fs_gsys(FileSystem *fs, int op)
@@ -200,55 +196,6 @@ __device__ void fs_create_pseudo_file(
 		fcb_get_filesize(parent_fcb) += my_strlen(name) + 1;
 		fcb_get_modified_time(parent_fcb) = gtime; // return a reference
 	}
-	// print_fcb(fs, fcb);
-}
-
-/*
-Write one character to the end of file.
-It handles bitmap and fcb automatically.
-
-NOTE: Check is performed on whether the next block is used
-by another file. By design, this situation should not happen.
-*/
-__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char input) {
-	u32 block_id, length, size;
-	size = fcb_get_filesize(fcb) + 1;
-	fcb_get_filesize(fcb) = size;
-	length = size / fs->STORAGE_BLOCK_SIZE;
-	if (size % fs->STORAGE_BLOCK_SIZE) {
-		length++;
-	}
-	block_id = fcb_get_start_block(fcb);
-	assert(fs_is_block_free(fs, block_id+length-1));
-	u32 pointer = fs_get_file_data_index(fs, fcb);
-	fs->volume[pointer+size-1] = input;
-	// update fcb and bit map
-	fs_update_size(fs, fcb, size);
-}
-
-/*
-Write to the end of file.
-It handles bitmap and fcb automatically.
-
-NOTE: Check is performed on whether the next block is used
-by another file. By design, this situation should not happen.
-*/
-__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char * input) {
-	u32 block_id, length, size;
-	size = fcb_get_filesize(fcb) + my_strlen(input);
-	fcb_get_filesize(fcb) = size;
-	length = size / fs->STORAGE_BLOCK_SIZE;
-	if (size % fs->STORAGE_BLOCK_SIZE) {
-		length++;
-	}
-	block_id = fcb_get_start_block(fcb);
-	assert(fs_is_block_free(fs, block_id+length-1));
-	u32 pointer = fs_get_file_data_index(fs, fcb);
-	for (int i = 0; i < my_strlen(input); i++) {
-		fs->volume[pointer+size-my_strlen(input)+i] = input[i];
-	}
-	// update fcb and bit map
-	fs_update_size(fs, fcb, size);
 }
 
 /*
@@ -286,7 +233,6 @@ __device__ void fs_print_pwd(FileSystem *fs) {
 		i++;
 	}
 	i--;
-	// printf("/root");
 	while (i >= 0) {
 		printf("/%s", fcb_get_filename(dir_stack[i]));
 		i--;
@@ -306,7 +252,6 @@ __device__ void fs_rm_dir(FileSystem *fs, char *s) {
 		assert(0);
 	}
 	fcb = fs_get_fcb(fs, fcb_index);
-	// print_fcb(fs, fcb);
 	// remove cur dir and sub dirs
 	int level = 0;
 	u32 dir_stack[3] = {NULL_FCB_INDEX, NULL_FCB_INDEX, NULL_FCB_INDEX}; // for post order traversal, store fcb index
@@ -360,7 +305,6 @@ It clears the file content and update the content of parent dir.
 You can remove an empty dir with it.
 */
 __device__ void fs_rm_pseudo_file(FileSystem *fs, uchar *fcb) {
-	// print_fcb(fs, fcb);
 	u32 fcb_index;
 	uchar * parent_fcb;
 	char * name = fcb_get_filename(fcb);
@@ -390,8 +334,6 @@ If no children is found, return NULL_FCB_INDEX.
 It search over the entire FCB entries.
 */
 __device__ u32 fs_get_first_child(FileSystem *fs, u32 fcb_index) {
-	// printf("warning: not sure about the implementation\n");
-	// u32 pointer = fs_get_file_data_index(fs, fs_get_fcb(fs, fcb_index));
 	uchar * fcb;
 	u32 child_fcb_index;
 	for (child_fcb_index = 0; child_fcb_index < fs->FCB_ENTRIES; child_fcb_index++) {

@@ -51,8 +51,6 @@ __device__ void fs_gsys(FileSystem *fs, int op, char *s);
 __device__ void fs_cd_parent_dir(FileSystem *fs);
 __device__ void fs_print_pwd(FileSystem *fs);
 __device__ void fs_ls(const FileSystem *fs, int op);
-__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char input);
-__device__ void fs_write_append(FileSystem *fs, uchar *fcb, char * input);
 __device__ void fs_create_pseudo_file(FileSystem *fs, uchar *fcb, char * name, u32 parent_fcb_index, int op);
 __device__ void fs_rm_pseudo_file(FileSystem *fs, uchar *fcb);
 __device__ void fs_rm_file(FileSystem *fs, char *s);
