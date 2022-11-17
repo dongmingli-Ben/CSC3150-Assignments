@@ -60,6 +60,7 @@ __device__ void fs_rm_dir(FileSystem *fs, char *s);
 __device__ void fs_mkdir(FileSystem *fs, char *s);
 __device__ void fs_cd_child_dir(FileSystem *fs, char *s);
 __device__ u32 fs_search_by_name(const FileSystem *fs, const char *s, u32 parent_fcb_index);
+__device__ uchar * fs_search_dir_filename(FileSystem *fs, const char *s, u32 parent_fcb_index);
 __device__ u32 fs_search_freeblock(const FileSystem *fs);
 __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op);
 __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb);

@@ -30,3 +30,5 @@ FCB content (contiguous allocation): 32B
 - created time: counter/timestamp, counter: >= 10 bits; main: 2B
 - bonus tree directory: index to parent dir: >= 10 bits, bonus: 2B
 - directory indicator: 1 bit; bonus: 2B
+
+**Note**: The file content for a directory is always null.

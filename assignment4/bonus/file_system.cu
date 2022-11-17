@@ -197,8 +197,7 @@ __device__ void fs_create_pseudo_file(
 	// update parent file content
 	if (parent_fcb_index != NULL_FCB_INDEX) {
 		uchar * parent_fcb = fs_get_fcb(fs, parent_fcb_index);
-		fs_write_append(fs, parent_fcb, name);
-		fs_write_append(fs, parent_fcb, '\0');
+		fcb_get_filesize(parent_fcb) += my_strlen(name) + 1;
 		fcb_get_modified_time(parent_fcb) = gtime; // return a reference
 	}
 	// print_fcb(fs, fcb);
@@ -287,7 +286,7 @@ __device__ void fs_print_pwd(FileSystem *fs) {
 		i++;
 	}
 	i--;
-	printf("/root");
+	// printf("/root");
 	while (i >= 0) {
 		printf("/%s", fcb_get_filename(dir_stack[i]));
 		i--;
@@ -320,10 +319,13 @@ __device__ void fs_rm_dir(FileSystem *fs, char *s) {
 			// empty directory
 			fs_rm_pseudo_file(fs, fs_get_fcb(fs, dir_stack[level]));
 			dir_stack[level] = NULL_FCB_INDEX;
+			if (level == 0) break;
 			level--;
+			continue;
 		}
 		if (!fcb_is_directory(fcb)) {
 			fs_rm_pseudo_file(fs, fcb);
+			continue;
 		}
 		// add dir to stack
 		level++;
@@ -360,21 +362,16 @@ You can remove an empty dir with it.
 __device__ void fs_rm_pseudo_file(FileSystem *fs, uchar *fcb) {
 	// print_fcb(fs, fcb);
 	u32 fcb_index;
+	uchar * parent_fcb;
 	char * name = fcb_get_filename(fcb);
 	// set bit map
 	fs_rm_file_content(fs, fcb);
-	// update parent FCB and remove fcb
+	// update parent FCB
 	fcb_index = fcb_get_parent_fcb_index(fcb);
+	parent_fcb = fs_get_fcb(fs, fcb_index); // parent fcb
+	fcb_get_filesize(parent_fcb) -= (my_strlen(name)+1);
+	// clean up fcb
 	memset(fcb, 0, 32);
-	fcb = fs_get_fcb(fs, fcb_index); // parent fcb
-	uchar *start;
-	int length;
-	uchar * file_content;
-	file_content = &fs->volume[fs_get_file_data_index(fs, fcb)];
-	start = (uchar *) my_strstr((char *)file_content, name);
-	length = my_strlen(name);
-	memcpy(start, start+length+1, 20-(start-file_content)-length-1); // -1 for "\0"
-	memset(file_content+32-length, 0, length);
 }
 
 /*
@@ -388,14 +385,22 @@ __device__ u32 fs_get_file_data_index(FileSystem *fs, uchar *fcb) {
 
 /*
 Return the index of fcb entry of first children of the dir.
-If no children is found, return nullptr
+If no children is found, return NULL_FCB_INDEX.
+
+It search over the entire FCB entries.
 */
 __device__ u32 fs_get_first_child(FileSystem *fs, u32 fcb_index) {
-	printf("warning: not sure about the implementation\n");
-	u32 pointer = fs_get_file_data_index(fs, fs_get_fcb(fs, fcb_index));
-	uchar * pt = &fs->volume[pointer];
-	fcb_index = fs_search_by_name(fs, (char *)pt, fcb_index);
-	return fcb_index;
+	// printf("warning: not sure about the implementation\n");
+	// u32 pointer = fs_get_file_data_index(fs, fs_get_fcb(fs, fcb_index));
+	uchar * fcb;
+	u32 child_fcb_index;
+	for (child_fcb_index = 0; child_fcb_index < fs->FCB_ENTRIES; child_fcb_index++) {
+		fcb = fs_get_fcb(fs, child_fcb_index);
+		if (fcb_get_parent_fcb_index(fcb) == fcb_index) {
+			return child_fcb_index;
+		}
+	}
+	return NULL_FCB_INDEX;
 }
 
 /*
