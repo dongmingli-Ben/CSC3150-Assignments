@@ -50,7 +50,8 @@ __device__ uchar * fs_get_fcb(FileSystem *fs, u32 index);
 __device__ char * fcb_get_filename(const uchar * fcb);
 __device__ u32 & fcb_get_filesize(const uchar * fcb);
 __device__ u32 & fcb_get_start_block(const uchar * fcb);
-__device__ u32 & fcb_get_modified_time(const uchar * fcb);
+__device__ unsigned short & fcb_get_modified_time(const uchar * fcb);
+__device__ unsigned short & fcb_get_created_time(const uchar * fcb);
 __device__ bool fcb_is_valid(const uchar * fcb);
 
 

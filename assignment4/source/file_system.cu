@@ -48,8 +48,6 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 	}
 	fcb = fs_get_fcb(fs, fcb_index);
 	filename = fcb_get_filename(fcb);
-	// increment global time
-	gtime++;
 	// printf("%s - %s : %d\n", filename, s, my_strcmp(filename, s));
 	if (my_strcmp(filename, s) != 0) {
 		// not found
@@ -65,8 +63,12 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 		fcb_get_filesize(fcb) = 0;  // return a reference
 		fcb_get_start_block(fcb) = block_id;
 		fs_set_superblock(fs, block_id, 1);  // 1 ==> used
-		// set modified time
+		// increment global time
+		gtime++;
+		assert((gtime >> 16) == 0);
+		// set modified time and created time
 		fcb_get_modified_time(fcb) = gtime; // return a reference
+		fcb_get_created_time(fcb) = gtime; // return a reference
 	} 
 	return fcb_index;
 }
@@ -101,7 +103,7 @@ fp: the corresponding FCB index
 __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 {
 	/* Implement write operation here */
-	assert(size < (1 << 10));
+	assert(size <= (1 << 10));
 	uchar * fcb;
 	u32 block_id;
 	fcb = fs_get_fcb(fs, fp);
@@ -118,6 +120,7 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	fs_update_size(fs, fcb, size);
 	// increment time
 	gtime++;
+	assert((gtime >> 16) == 0);
 	fcb_get_modified_time(fcb) = gtime;
 	return 0;
 }
@@ -137,11 +140,20 @@ __device__ void fs_gsys(FileSystem *fs, int op)
 		file_num++;
 	}
 	// sort
+	// debug
+	// for (int i = 0; i < file_num; i++) {
+	// 	if (my_strcmp(fcb_get_filename(fcbs[i]), "EA\0") == 0) {
+	// 		printf("--------DEBUG MESSAGE------------\n");
+	// 		printf("%s %u\n", fcb_get_filename(fcbs[i]),
+	// 			fcb_get_filesize(fcbs[i]));
+	// 		printf("--------DEBUG MESSAGE------------\n");
+	// 	}
+	// }
 	// bubble sort
 	uchar * tmp;
 	bool swap = false;
 	for (int i = 0; i < file_num; i++) {
-		for (int j = i; j < file_num-1; j++) {
+		for (int j = 0; j < file_num-1-i; j++) {
 			swap = false;
 			if (op == LS_D) {
 				if (fcb_get_modified_time(fcbs[j]) < fcb_get_modified_time(fcbs[j+1])) {
@@ -153,8 +165,8 @@ __device__ void fs_gsys(FileSystem *fs, int op)
 			} else if (op == LS_S) {
 				if (fcb_get_filesize(fcbs[j]) < fcb_get_filesize(fcbs[j+1])) {
 					swap = true;
-				} else if (fcb_get_filesize(fcbs[j]) < fcb_get_filesize(fcbs[j+1])
-						&& fcb_get_modified_time(fcbs[j]) < fcb_get_modified_time(fcbs[j+1])) {
+				} else if (fcb_get_filesize(fcbs[j]) == fcb_get_filesize(fcbs[j+1])
+						&& fcb_get_created_time(fcbs[j]) > fcb_get_created_time(fcbs[j+1])) {
 					swap = true;
 				}
 			} else {
@@ -271,9 +283,19 @@ __device__ bool fcb_is_valid(const uchar * fcb) {
 /*
 Return a reference to the modified time
 */
-__device__ u32 & fcb_get_modified_time(const uchar * fcb) {
+__device__ unsigned short & fcb_get_modified_time(const uchar * fcb) {
 	u32 * ints = (u32 *) &(fcb[20]);
-	return ints[2];
+	unsigned short * shorts = (unsigned short *) &(ints[2]);
+	return shorts[0];
+}
+
+/*
+Return a reference to the created time
+*/
+__device__ unsigned short & fcb_get_created_time(const uchar * fcb) {
+	u32 * ints = (u32 *) &(fcb[20]);
+	unsigned short * shorts = (unsigned short *) &(ints[2]);
+	return shorts[1];
 }
 
 /*
