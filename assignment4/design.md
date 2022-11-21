@@ -32,3 +32,5 @@ FCB content (contiguous allocation): 32B
 - directory indicator: 1 bit; bonus: 2B
 
 **Note**: The file content for a directory is always null.
+
+**Update**: need to do file compact when there is external fragmentation.

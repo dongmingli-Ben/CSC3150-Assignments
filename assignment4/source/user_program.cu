@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 
+#include <assert.h>
+
 __device__ void user_program(FileSystem *fs, uchar *input, uchar *output) {
 	
 	

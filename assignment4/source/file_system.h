@@ -39,8 +39,14 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp);
 __device__ void fs_gsys(FileSystem *fs, int op);
 __device__ void fs_gsys(FileSystem *fs, int op, char *s);
 
+__device__ void print_superblock(const FileSystem *fs);
+__device__ void fs_compact(FileSystem *fs);
+__device__ void fs_move_file_blocks(FileSystem *fs, uchar *fcb, u32 block_id);
 __device__ u32 fs_search_by_name(const FileSystem *fs, const char *s);
+__device__ int fs_get_superblock(FileSystem *fs, u32 block_id);
+__device__ const int fs_get_superblock(const FileSystem *fs, u32 block_id);
 __device__ u32 fs_search_freeblock(const FileSystem *fs);
+__device__ u32 fs_search_freeblock(const FileSystem *fs, u32 num_blocks);
 __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op);
 __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb);
 __device__ void fs_update_size(FileSystem *fs, uchar *fcb, u32 size);
