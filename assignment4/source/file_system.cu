@@ -48,7 +48,6 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 	}
 	fcb = fs_get_fcb(fs, fcb_index);
 	filename = fcb_get_filename(fcb);
-	// printf("%s - %s : %d\n", filename, s, my_strcmp(filename, s));
 	if (my_strcmp(filename, s) != 0) {
 		// not found
 		if (op == G_READ) {
@@ -69,9 +68,6 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 		fcb_get_modified_time(fcb) = gtime; // return a reference
 		fcb_get_created_time(fcb) = gtime; // return a reference
 	} 
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("---------------------------------------------------------------\n");
 	return fcb_index;
 }
 
@@ -94,9 +90,6 @@ __device__ void fs_read(FileSystem *fs, uchar *output, u32 size, u32 fp)
 		}
 		output[i] = fs->volume[pointer+i];
 	}
-	// // set modified time
-	// gtime++;
-	// fcb_get_modified_time(fcb) = gtime;
 }
 
 /*
@@ -117,9 +110,6 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	fcb_get_filesize(fcb) = 0;
 	// search for a large enough extent, if not, do compact
 	block_num = size/fs->STORAGE_BLOCK_SIZE + (size%fs->STORAGE_BLOCK_SIZE > 0);
-	// printf("[fs_write] writing %u B data\n", size);
-	// printf("[fs_write] %u %u\n", size/fs->STORAGE_BLOCK_SIZE, (size%fs->STORAGE_BLOCK_SIZE > 0));
-	// printf("[fs_write] requesting %u blocks\n", block_num);
 	block_id = fs_search_freeblock(fs, block_num);
 	if (block_id == 0x80000000) {
 		// disk compact
@@ -137,13 +127,7 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	}
 	// setup fcb and super block
 	fcb_get_start_block(fcb) = block_id;
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("---------------------------------------------------------------\n");
 	fs_update_size(fs, fcb, size);
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("---------------------------------------------------------------\n");
 	// increment time
 	gtime++;
 	assert((gtime >> 16) == 0);
@@ -166,15 +150,6 @@ __device__ void fs_gsys(FileSystem *fs, int op)
 		file_num++;
 	}
 	// sort
-	// debug
-	// for (int i = 0; i < file_num; i++) {
-	// 	if (my_strcmp(fcb_get_filename(fcbs[i]), "EA\0") == 0) {
-	// 		printf("--------DEBUG MESSAGE------------\n");
-	// 		printf("%s %u\n", fcb_get_filename(fcbs[i]),
-	// 			fcb_get_filesize(fcbs[i]));
-	// 		printf("--------DEBUG MESSAGE------------\n");
-	// 	}
-	// }
 	// bubble sort
 	uchar * tmp;
 	bool swap = false;
@@ -260,22 +235,15 @@ __device__ void fs_update_size(FileSystem *fs, uchar *fcb, u32 size) {
 	u32 block_id, length;
 	fcb_get_filesize(fcb) = size;
 	block_id = fcb_get_start_block(fcb);
-	// assert(block_id % 32 == 0);  // blocks of every file should begin with 32x
 	length = size / fs->STORAGE_BLOCK_SIZE;
 	if (size % fs->STORAGE_BLOCK_SIZE) {
 		length++;
 	}
 	// 0B file does not occupy any block
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("---------------------------------------------------------------\n");
 	for (u32 i = 0; i < length; i++) {
 		assert(fs_get_superblock(fs, block_id+i) == 0);
 		fs_set_superblock(fs, block_id+i, 1);
 	}
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("---------------------------------------------------------------\n");
 }
 
 /*
@@ -402,21 +370,11 @@ Set bitmap
 1: used, 0: free
 */
 __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op) {
-	// printf("----------------------before set_superblock---------------------------\n");
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
-	// printf("setting block %u to %d\n", block_id, op);
-	// printf("before setting %d\n", fs_get_superblock(fs, block_id));
 	uchar higher, lower;
 	uchar position = block_id % 8;
 	higher = (fs->volume[block_id/8] >> (8-position)) << (8-position);
 	lower = ((fs->volume[block_id/8] << (position+1)) & 0xff) >> (position+1);
 	fs->volume[block_id/8] = higher | lower | (op << (7-position));
-	// printf("after setting %d\n", fs_get_superblock(fs, block_id));
-	// printf("block 8, %i\n", fs_get_superblock(fs, 8));
-	// printf("----------------------after set_superblock---------------------------\n");
-	// print_superblock(fs);
-	// printf("---------------------------------------------------------------\n");
 }
 
 __device__ void print_superblock(const FileSystem *fs) {
@@ -502,8 +460,6 @@ __device__ u32 fs_search_freeblock(const FileSystem *fs, u32 num_blocks) {
 			cnt = 0;
 		}
 	}
-	// printf("[search free blocks] requesting %u blocks\n", num_blocks);
-	// print_superblock(fs);
 	return 0x80000000;
 }
 
