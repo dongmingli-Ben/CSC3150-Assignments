@@ -20,6 +20,7 @@ typedef uint32_t u32;
 #define RM_RF 7
 
 #define NULL_FCB_INDEX (1 << 15)
+#define NULL_BLOCK_INDEX (1 << 15)
 
 struct FileSystem {
 	uchar *volume;
@@ -48,6 +49,8 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp);
 __device__ void fs_gsys(FileSystem *fs, int op);
 __device__ void fs_gsys(FileSystem *fs, int op, char *s);
 
+__device__ void fs_compact(FileSystem *fs);
+__device__ void fs_move_file_blocks(FileSystem *fs, uchar *fcb, u32 new_block_id);
 __device__ void fs_cd_parent_dir(FileSystem *fs);
 __device__ void fs_print_pwd(FileSystem *fs);
 __device__ void fs_ls(const FileSystem *fs, int op);
@@ -59,7 +62,8 @@ __device__ void fs_mkdir(FileSystem *fs, char *s);
 __device__ void fs_cd_child_dir(FileSystem *fs, char *s);
 __device__ u32 fs_search_by_name(const FileSystem *fs, const char *s, u32 parent_fcb_index);
 __device__ uchar * fs_search_dir_filename(FileSystem *fs, const char *s, u32 parent_fcb_index);
-__device__ u32 fs_search_freeblock(const FileSystem *fs);
+__device__ u32 fs_search_freeblock(const FileSystem *fs, u32 num_blocks);
+__device__ int fs_get_superblock(const FileSystem *fs, u32 block_id);
 __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op);
 __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb);
 __device__ void fs_update_size(FileSystem *fs, uchar *fcb, u32 size);
@@ -67,7 +71,6 @@ __device__ const uchar * fs_get_fcb(const FileSystem *fs, u32 index);
 __device__ uchar * fs_get_fcb(FileSystem *fs, u32 index);
 __device__ u32 fs_get_file_data_index(FileSystem *fs, uchar *fcb);
 __device__ u32 fs_get_first_child(FileSystem *fs, u32 fcb_index);
-__device__ bool fs_is_block_free(FileSystem *fs, u32 block_id);
 
 __device__ char * fcb_get_filename(const uchar * fcb);
 __device__ unsigned short & fcb_get_filesize(const uchar * fcb);
@@ -80,6 +83,7 @@ __device__ bool fcb_is_valid(const uchar * fcb);
 
 // some debug functions
 __device__ void print_fcb(FileSystem *fs, uchar *fcb);
+__device__ void print_superblock(const FileSystem *fs);
 
 // some standard C library functions
 

@@ -92,13 +92,27 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	// clean up old content
 	fs_rm_file_content(fs, fcb); // set bitmap (optional)
 	fcb_get_filesize(fcb) = 0;
+	// search for a large enough extent, if not, do compact
+	u32 block_id, block_num;
+	block_num = size/fs->STORAGE_BLOCK_SIZE + (size%fs->STORAGE_BLOCK_SIZE > 0);
+	block_id = fs_search_freeblock(fs, block_num);
+	if (block_id == NULL_BLOCK_INDEX) {
+		// disk compact
+		fs_compact(fs);
+		block_id = fs_search_freeblock(fs, block_num);
+		if (block_id == NULL_BLOCK_INDEX) {
+			printf("Writing %u B to a file is too large, OS memory error.\n", size);
+			assert(0);
+		}
+	}
+	// setup fcb and super block
+	fcb_get_start_block(fcb) = block_id;
+	fs_update_size(fs, fcb, size);
 	// start writing data to file
 	u32 pointer = fs_get_file_data_index(fs, fcb);
 	for (int i = 0; i < size; i++) {
 		fs->volume[pointer+i] = input[i];
 	}
-	// setup fcb and super block
-	fs_update_size(fs, fcb, size);
 	// increment time
 	gtime++;
 	assert((gtime >> 16) == 0);
@@ -176,12 +190,15 @@ __device__ void fs_create_pseudo_file(
 		u32 parent_fcb_index, 
 		int op) {
 	assert(my_strlen(name) < 20);
+	// printf("---------------before create-----------------\n");
+	// print_fcb(fs, fcb);
+	// printf("---------------------------------------------\n");
 	my_strcpy(fcb_get_filename(fcb), name);
 	// allocate free blocks
-	u32 block_id = fs_search_freeblock(fs);
+	// u32 block_id = fs_search_freeblock(fs);
 	fcb_get_filesize(fcb) = 0;  // return a reference
-	fcb_get_start_block(fcb) = block_id;
-	fs_set_superblock(fs, block_id, 1);  // 1 ==> used
+	fcb_get_start_block(fcb) = NULL_BLOCK_INDEX;
+	// fs_set_superblock(fs, block_id, 1);  // 1 ==> used
 	fcb_is_directory(fcb) = op;
 	fcb_get_parent_fcb_index(fcb) = parent_fcb_index;
 	// increment global time
@@ -190,6 +207,9 @@ __device__ void fs_create_pseudo_file(
 	// set modified time and created time
 	fcb_get_modified_time(fcb) = gtime; // return a reference
 	fcb_get_created_time(fcb) = gtime; // return a reference
+	// printf("----------------after create-----------------\n");
+	// print_fcb(fs, fcb);
+	// printf("---------------------------------------------\n");
 	// update parent file content
 	if (parent_fcb_index != NULL_FCB_INDEX) {
 		uchar * parent_fcb = fs_get_fcb(fs, parent_fcb_index);
@@ -284,9 +304,6 @@ Remove a file, cannot remove directories.
 Need to update parent dir FCB too.
 */
 __device__ void fs_rm_file(FileSystem *fs, char *s) {
-	printf("--------------cur dir index-----------------\n");
-	printf("%u\n", fs->CUR_DIR_FCB_INDEX);
-	printf("--------------end ofcur dir index-----------------\n");
 	uchar * fcb;
 	u32 fcb_index;
 	fcb_index = fs_search_by_name(fs, s, fs->CUR_DIR_FCB_INDEX);
@@ -357,6 +374,10 @@ __device__ void fs_ls(const FileSystem * fs, int op) {
 		fcb = fs_get_fcb(fs, i);
 		if (!fcb_is_valid(fcb) || fcb_get_parent_fcb_index(fcb) != fs->CUR_DIR_FCB_INDEX) {
 			continue;
+		}
+		if (file_num == 50) {
+			printf("Directory has more than 50 files and subdir, terminating...\n");
+			assert(0);
 		}
 		fcbs[file_num] = fcb;
 		file_num++;
@@ -438,14 +459,15 @@ __device__ void fs_update_size(FileSystem *fs, uchar *fcb, u32 size) {
 	u32 block_id, length;
 	fcb_get_filesize(fcb) = size;
 	block_id = fcb_get_start_block(fcb);
-	assert(block_id % 32 == 0);  // blocks of every file should begin with 32x
+	// assert(block_id % 32 == 0);  // blocks of every file should begin with 32x
 	length = size / fs->STORAGE_BLOCK_SIZE;
 	if (size % fs->STORAGE_BLOCK_SIZE) {
 		length++;
 	}
-	memset(&(fs->volume[block_id/8]), 0, 4);
-	fs_set_superblock(fs, block_id, 1);  // the first block should be marked as used even for 0 byte file
-	for (u32 i = 1; i < length; i++) {
+	// memset(&(fs->volume[block_id/8]), 0, 4);
+	// fs_set_superblock(fs, block_id, 1);  // the first block should be marked as used even for 0 byte file
+	for (u32 i = 0; i < length; i++) {
+		assert(fs_get_superblock(fs, block_id+i) == 0);
 		fs_set_superblock(fs, block_id+i, 1);
 	}
 }
@@ -456,6 +478,10 @@ Set the corresponding blocks in super block to be free
 __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb) {
 	u32 block_id, size, length;
 	block_id = fcb_get_start_block(fcb);
+	if (block_id == NULL_BLOCK_INDEX) {
+		// 0B file
+		return;
+	}
 	size = fcb_get_filesize(fcb);
 	if (size > 0) {
 		length = size / fs->STORAGE_BLOCK_SIZE;
@@ -463,7 +489,8 @@ __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb) {
 			length++;
 		}
 	} else {
-		length = 1;
+		// a 0B file should have a null block index
+		assert(0);
 	}
 	for (u32 i = 0; i < length; i++) {
 		fs_set_superblock(fs, block_id+i, 0);
@@ -565,6 +592,14 @@ __device__ u32 fs_search_by_name(const FileSystem *fs, const char *s, u32 parent
 }
 
 /*
+Return the bit of the block
+*/
+__device__ int fs_get_superblock(const FileSystem *fs, u32 block_id) {
+	uchar position = block_id % 8;
+	return (fs->volume[block_id/8] >> (7-position)) & 1;
+}
+
+/*
 Set bitmap
 
 1: used, 0: free
@@ -578,30 +613,96 @@ __device__ void fs_set_superblock(FileSystem *fs, u32 block_id, int op) {
 }
 
 /*
-Check the bit map
+Search the bitmap to find a free block.
+If no free block available, return NULL_BLOCK_INDEX.
+
+The bitmap is big endian, i.e. higher bits stores blocks in the front.
 */
-__device__ bool fs_is_block_free(FileSystem *fs, u32 block_id) {
-	uchar position = block_id % 8;
-	return (fs->volume[block_id/8] >> (7-position)) & 1;
+__device__ u32 fs_search_freeblock(const FileSystem *fs, u32 num_blocks) {
+	// printf("Requesting %u blocks\n", num_blocks);
+	u32 cnt = 0;
+	for (u32 i = 0; i < 8*fs->SUPERBLOCK_SIZE; i++) {
+		if (fs_get_superblock(fs, i) == 0) {
+			cnt++;
+			if (cnt == num_blocks) {
+				return i-num_blocks+1;
+			}
+		} else {
+			cnt = 0;
+		}
+	}
+	return NULL_BLOCK_INDEX;
 }
 
 /*
-Search the bitmap to find a free block.
-If no free block available, return 0x8000000.
-
-The bitmap is big endian, i.e. higher bits stores blocks in the front.
-
-Since max file size is 1KB = 32 blocks, search free blocks every other 32 blocks
+compact files
 */
-__device__ u32 fs_search_freeblock(const FileSystem *fs) {
-	uchar val;
-	for (u32 i = 0; i < fs->SUPERBLOCK_SIZE; i+=4) {
-		val = fs->volume[i];
-		if ((val >> 7) == 0) {
-			return 8*i;
+__device__ void fs_compact(FileSystem *fs) {
+	// sort fcbs according to start block id
+	uchar **fcbs = new uchar * [fs->FCB_ENTRIES];
+	u32 file_count = 0;
+	uchar * fcb;
+	for (int i = 0; i < fs->FCB_ENTRIES; i++) {
+		fcb = fs_get_fcb(fs, i);
+		if (fcb_is_valid(fcb) & !fcb_is_directory(fcb)) {
+			fcbs[file_count] = fcb;
+			file_count++;
 		}
 	}
-	return 0x8000000;
+	// bubble sort
+	bool swap = false;
+	for (int i = 0; i < file_count; i++) {
+		for (int j = 0; j < file_count-1-i; j++) {
+			swap = false;
+			if (fcb_get_start_block(fcbs[j]) > fcb_get_start_block(fcbs[j+1])) {
+				swap = true;
+			}
+			if (swap) {
+				fcb = fcbs[j];
+				fcbs[j] = fcbs[j+1];
+				fcbs[j+1] = fcb;
+			}
+		}
+	}
+	// compact files
+	u32 block_id = 0;
+	for (int i = 0; i < file_count; i++) {
+		fs_move_file_blocks(fs, fcbs[i], block_id);
+		block_id += (fcb_get_filesize(fcbs[i])/fs->STORAGE_BLOCK_SIZE + 
+			(fcb_get_filesize(fcbs[i])%fs->STORAGE_BLOCK_SIZE > 0));
+	}
+	delete fcbs;
+}
+
+/*
+Move blocks of a file to a contiguous set of blocks with starting id
+```block_id```. It will raise an error if the blocks to be moved to 
+are occupied.
+Need to setup fcb and bitmap.
+*/
+__device__ void fs_move_file_blocks(FileSystem *fs, uchar *fcb, u32 new_block_id) {
+	u32 block_id = fcb_get_start_block(fcb);
+	if (block_id == new_block_id) {
+		return;
+	}
+	u32 num = fcb_get_filesize(fcb) / fs->STORAGE_BLOCK_SIZE;
+	num += fcb_get_filesize(fcb)%fs->STORAGE_BLOCK_SIZE > 0;
+	u32 block_pt, new_block_pt;
+	block_pt = fs->FILE_BASE_ADDRESS + block_id*(fs->STORAGE_BLOCK_SIZE);
+	new_block_pt = fs->FILE_BASE_ADDRESS + new_block_id*(fs->STORAGE_BLOCK_SIZE);
+	for (int i = 0; i < num; i++) {
+		assert(fs_get_superblock(fs, new_block_id+i) == 0);
+		for (int j = 0; j < fs->STORAGE_BLOCK_SIZE; j++) {
+			fs->volume[new_block_pt+j] = fs->volume[block_pt+j];
+		}
+		block_pt += fs->STORAGE_BLOCK_SIZE;
+		new_block_pt += fs->STORAGE_BLOCK_SIZE;
+		// set bitmap
+		fs_set_superblock(fs, block_id+i, 0);
+		fs_set_superblock(fs, new_block_id+i, 1);
+	}
+	// update fcb
+	fcb_get_start_block(fcb) = new_block_id;
 }
 
 // some debug functions
@@ -634,6 +735,70 @@ __device__ void print_fcb(FileSystem *fs, uchar *fcb) {
 	}
 	printf("\n");
 	printf("--------end of fcb----------\n");
+}
+
+__device__ void print_superblock(const FileSystem *fs) {
+	// sort fcbs according to start block id
+	const uchar **fcbs = new const uchar * [fs->FCB_ENTRIES];
+	u32 file_count = 0;
+	const uchar * fcb;
+	for (int i = 0; i < fs->FCB_ENTRIES; i++) {
+		fcb = fs_get_fcb(fs, i);
+		if (fcb_is_valid(fcb) && !fcb_is_directory(fcb)) {
+			fcbs[file_count] = fcb;
+			file_count++;
+		}
+	}
+	// bubble sort
+	bool swap = false;
+	for (int i = 0; i < file_count; i++) {
+		for (int j = 0; j < file_count-1-i; j++) {
+			swap = false;
+			if (fcb_get_start_block(fcbs[j]) > fcb_get_start_block(fcbs[j+1])) {
+				swap = true;
+			}
+			if (swap) {
+				fcb = fcbs[j];
+				fcbs[j] = fcbs[j+1];
+				fcbs[j+1] = fcb;
+			}
+		}
+	}
+	int i = 0;
+	u32 length, block_id, size;
+	printf("------------------super block occupation--------------------\n");
+	for (int j = 0; j < 8*fs->SUPERBLOCK_SIZE; j++) {
+		if (i >= file_count) {
+			if (fs_get_superblock(fs, j) == 1) {
+				printf("Block %d is OCCUPIED by no file\n", j);
+			}
+			continue;
+		}
+		fcb = fcbs[i];
+		size = fcb_get_filesize(fcbs[i]);
+		block_id = fcb_get_start_block(fcbs[i]);
+		length = size / fs->STORAGE_BLOCK_SIZE;
+		length += (size%fs->STORAGE_BLOCK_SIZE) > 0;
+		if (fs_get_superblock(fs, j) == 0) {
+			if (block_id <= j && j < block_id+length) {
+				printf("Block %d is NOT occupied by file %s!\n", j, fcb_get_filename(fcbs[i]));
+			}
+		} else {
+			if (block_id <= j && j < block_id+length) {
+				if (j == block_id+length-1) {
+					printf("Block %d-%d is occupied by file %s\n", 
+						block_id,
+						block_id+length-1,
+						fcb_get_filename(fcb));
+					i++;
+				}
+				continue;
+			}
+			printf("Block %d is OCCUPIED by no file\n", j);
+		}
+	}
+	printf("------------------end of super block---------------------------\n");
+	delete fcbs;
 }
 
 // some standard C library functions
