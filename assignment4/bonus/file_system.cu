@@ -46,7 +46,6 @@ __device__ u32 fs_open(FileSystem *fs, char *s, int op)
 		assert(0);
 	}
 	fcb = fs_get_fcb(fs, fcb_index);
-	// printf("%s - %s : %d\n", filename, s, my_strcmp(filename, s));
 	if (!fcb_is_valid(fcb)) {
 		// not found
 		if (op == G_READ) {
@@ -90,7 +89,7 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	uchar * fcb;
 	fcb = fs_get_fcb(fs, fp);
 	// clean up old content
-	fs_rm_file_content(fs, fcb); // set bitmap (optional)
+	fs_rm_file_content(fs, fcb); // set bitmap
 	fcb_get_filesize(fcb) = 0;
 	// search for a large enough extent, if not, do compact
 	u32 block_id, block_num;
@@ -190,15 +189,9 @@ __device__ void fs_create_pseudo_file(
 		u32 parent_fcb_index, 
 		int op) {
 	assert(my_strlen(name) < 20);
-	// printf("---------------before create-----------------\n");
-	// print_fcb(fs, fcb);
-	// printf("---------------------------------------------\n");
 	my_strcpy(fcb_get_filename(fcb), name);
-	// allocate free blocks
-	// u32 block_id = fs_search_freeblock(fs);
 	fcb_get_filesize(fcb) = 0;  // return a reference
 	fcb_get_start_block(fcb) = NULL_BLOCK_INDEX;
-	// fs_set_superblock(fs, block_id, 1);  // 1 ==> used
 	fcb_is_directory(fcb) = op;
 	fcb_get_parent_fcb_index(fcb) = parent_fcb_index;
 	// increment global time
@@ -207,9 +200,6 @@ __device__ void fs_create_pseudo_file(
 	// set modified time and created time
 	fcb_get_modified_time(fcb) = gtime; // return a reference
 	fcb_get_created_time(fcb) = gtime; // return a reference
-	// printf("----------------after create-----------------\n");
-	// print_fcb(fs, fcb);
-	// printf("---------------------------------------------\n");
 	// update parent file content
 	if (parent_fcb_index != NULL_FCB_INDEX) {
 		uchar * parent_fcb = fs_get_fcb(fs, parent_fcb_index);
