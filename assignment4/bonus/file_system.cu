@@ -95,7 +95,7 @@ __device__ u32 fs_write(FileSystem *fs, uchar* input, u32 size, u32 fp)
 	u32 block_id, block_num;
 	block_num = size/fs->STORAGE_BLOCK_SIZE + (size%fs->STORAGE_BLOCK_SIZE > 0);
 	block_id = fs_search_freeblock(fs, block_num);
-	if (block_id == NULL_BLOCK_INDEX) {
+	if (block_id == NULL_BLOCK_INDEX && size > 0) {
 		// disk compact
 		fs_compact(fs);
 		block_id = fs_search_freeblock(fs, block_num);
@@ -480,7 +480,8 @@ __device__ void fs_rm_file_content(FileSystem *fs, uchar *fcb) {
 		}
 	} else {
 		// a 0B file should have a null block index
-		assert(0);
+		printf("warning: 0B file with non-null start_block_id %u\n", block_id);
+		length = 0;
 	}
 	for (u32 i = 0; i < length; i++) {
 		fs_set_superblock(fs, block_id+i, 0);
@@ -672,9 +673,10 @@ Need to setup fcb and bitmap.
 */
 __device__ void fs_move_file_blocks(FileSystem *fs, uchar *fcb, u32 new_block_id) {
 	u32 block_id = fcb_get_start_block(fcb);
-	if (block_id == new_block_id) {
+	if (block_id == new_block_id || block_id == NULL_BLOCK_INDEX) {
 		return;
 	}
+	assert(fcb_get_filesize(fcb) > 0);
 	u32 num = fcb_get_filesize(fcb) / fs->STORAGE_BLOCK_SIZE;
 	num += fcb_get_filesize(fcb)%fs->STORAGE_BLOCK_SIZE > 0;
 	u32 block_pt, new_block_pt;
