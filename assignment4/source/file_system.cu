@@ -359,7 +359,7 @@ __device__ int fs_get_superblock(FileSystem *fs, u32 block_id) {
 /*
 Return a copy to the bit in the bit map
 */
-__device__ const int fs_get_superblock(const FileSystem *fs, u32 block_id) {
+__device__ int fs_get_superblock(const FileSystem *fs, u32 block_id) {
 	uchar position = block_id % 8;
 	return (fs->volume[block_id/8] >> (7-position)) & 1;
 }
@@ -406,6 +406,7 @@ __device__ void print_superblock(const FileSystem *fs) {
 	}
 	int i = 0;
 	u32 length, block_id, size;
+	printf("------------------super block occupation--------------------\n");
 	for (int j = 0; j < 8*fs->SUPERBLOCK_SIZE; j++) {
 		if (i >= file_count) {
 			if (fs_get_superblock(fs, j) == 1) {
@@ -436,6 +437,7 @@ __device__ void print_superblock(const FileSystem *fs) {
 			printf("Block %d is OCCUPIED by no file\n", j);
 		}
 	}
+	printf("------------------end of super block---------------------------\n");
 	delete fcbs;
 }
 
@@ -534,6 +536,8 @@ __device__ void fs_move_file_blocks(FileSystem *fs, uchar *fcb, u32 new_block_id
 		fs_set_superblock(fs, block_id+i, 0);
 		fs_set_superblock(fs, new_block_id+i, 1);
 	}
+	// update fcb
+	fcb_get_start_block(fcb) = new_block_id;
 }
 
 // some standard C library functions
